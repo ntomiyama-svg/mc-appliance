@@ -15,6 +15,7 @@ from app.auth import AuthMiddleware
 from app.config import APP_NAME, APP_VERSION, BASE_DIR, SECRET_KEY
 from app.database import init_db
 from app.routers import auth, backups, dashboard, servers, system
+from app.services import scheduler_service
 from app.templating import templates
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
@@ -49,6 +50,10 @@ def _on_startup() -> None:
         raise RuntimeError(
             "mc-appliance must not be run as root. Start it as a normal user."
         )
+    # Start the v0.3 backup scheduler. It reads schedules from the DB on every
+    # tick, so this just spins up the daemon thread; any failure is swallowed so
+    # a broken scheduler can never stop the web app from serving.
+    scheduler_service.start_scheduler()
 
 
 # Make app metadata available to every template.

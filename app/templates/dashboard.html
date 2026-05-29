@@ -15,6 +15,12 @@
   </div>
 
   <div class="card stat">
+    <div class="label">Backup Schedules</div>
+    <div class="value">{{ schedules_enabled }}</div>
+    <div class="sub">enabled</div>
+  </div>
+
+  <div class="card stat">
     <div class="label">CPU Usage</div>
     <div class="value"><span id="m-cpu">{{ metrics.cpu_percent }}%</span></div>
     <div class="bar"><span id="bar-cpu" style="width: {{ metrics.cpu_percent }}%"></span></div>

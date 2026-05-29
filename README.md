@@ -79,6 +79,28 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 > The app **refuses to start as root** by design. Run it as a normal user that
 > has read/write access to your Minecraft server folders.
 
+### Configuration (dev vs prod)
+
+Storage paths and the bind host/port come from an optional YAML config file.
+The file is located in this order (highest precedence first):
+
+1. **`$MC_APPLIANCE_CONFIG`** — explicit path. The systemd unit always sets this
+   to `/etc/mc-appliance/config.yaml`.
+2. **`./data/config.yaml`** — *dev only* (when `MC_APPLIANCE_CONFIG` is unset and
+   the app detects a dev checkout). Lets a checkout keep its own config without
+   touching `/etc`.
+3. **`/etc/mc-appliance/config.yaml`** — the system-install default.
+
+Individual `MC_APPLIANCE_*` environment variables (e.g. `MC_APPLIANCE_DATA_DIR`,
+`MC_APPLIANCE_SERVERS_DIR`) still override whatever the file provides.
+
+`scripts/dev_run.sh` exports `MC_APPLIANCE_ENV=dev` and leaves
+`MC_APPLIANCE_CONFIG` unset, so a dev run prefers `./data/config.yaml`. If
+`/etc/mc-appliance/config.yaml` exists but is **not readable** (e.g. root-owned
+on a shared host), a dev run logs a warning and falls back to built-in defaults
+instead of aborting. "dev vs prod" is decided by `MC_APPLIANCE_ENV`
+(`dev`/`prod`), falling back to a heuristic (installs live under `/opt`).
+
 ## Installing as a system service (systemd)
 
 For a persistent install that survives reboots, use the installer. It runs as
@@ -204,9 +226,50 @@ When RCON is enabled, **Stop** uses RCON `save-all` + `stop` first and only
 falls back to `SIGTERM` if RCON is unavailable or fails; backups run
 `save-all flush` beforehand so the snapshot is consistent.
 
+## Creating a new Minecraft server (v0.3)
+
+Since **v0.3** you can create a brand-new server from the GUI — no shell needed.
+Full details: [`docs/10_server_creation.md`](docs/10_server_creation.md).
+
+1. Click **Servers → Create Server**.
+2. Fill in the form: name (letters/digits/`-`/`_` only — it becomes the folder
+   name), server type, port, memory, MOTD, max players, gamemode, difficulty,
+   online-mode, optional RCON settings, and an optional `server.jar` upload
+   (`.jar` only).
+3. Tick the **Minecraft EULA** checkbox (required) and click **Create server**.
+
+The app creates `SERVERS_DIR/<name>/` with `eula.txt` (`eula=true`),
+`server.properties` (generated from your inputs), empty `mods/` and `plugins/`
+directories, and stores the uploaded jar as `server.jar`. A `servers` row is
+registered (`jar_file=server.jar`, `java_path=/usr/bin/java`, `status=stopped`,
+RCON mirrored). `SERVERS_DIR` defaults to `./data/servers` in a dev checkout and
+`/var/lib/mc-appliance/servers` under a system install.
+
+> The new-server directory, files, jar upload, DB row, and mod/plugin scaffolding
+> are all created **without a real Minecraft server**. Actually *starting* it
+> still needs a runnable jar and working Java (unchanged from v0.1).
+
+### Mods & Plugins (v0.3)
+
+Each server's detail page has **Mods** and **Plugins** sections: upload `.jar`
+files and enable/disable them (disabling renames `foo.jar` → `foo.jar.disabled`).
+There is **no delete**. See
+[`docs/11_mod_plugin_management.md`](docs/11_mod_plugin_management.md).
+
+### Scheduled backups (v0.3)
+
+Each server's detail page has a **Backup schedule** section: enable daily (at a
+time) or interval (every N minutes) automatic backups. An in-process daemon
+thread runs them while the app is up and logs outcomes to
+`backup_scheduler.log`; the dashboard shows the number of enabled schedules.
+
+> **Retention is recorded but old backups are not pruned in v0.3** — file
+> deletion is intentionally out of scope (see the security model). See
+> [`docs/12_backup_schedule.md`](docs/12_backup_schedule.md).
+
 ## Registering an existing Minecraft server
 
-1. Click **Servers → Register Server**.
+1. Click **Servers → Register existing folder**.
 2. Enter the absolute path to your existing server folder (e.g.
    `/srv/minecraft/survival`) and click **Scan folder**.
 3. Review the detection results, give the server a display name, pick the jar
@@ -276,8 +339,9 @@ See [`docs/06_future_plan.md`](docs/06_future_plan.md). Highlights:
 
 - v0.1.2: administrator login (single admin, cookie sessions) ✅
 - v0.2: RCON-based safe stop + allow-listed console + `save-all` before backups ✅
+- v0.3: GUI server creation, mod/plugin management, scheduled backups ✅
 - v0.2+ (pending): HTTPS, CSRF tokens, multi-user/roles, systemd unit management
-- v0.3: backup restore, scheduling, multi-user roles
+- v0.3+ (pending): backup restore, backup retention pruning, multi-user roles
 - Later: Rocky Linux appliance image, Ubuntu/Debian support
 
 ## Documentation
@@ -290,3 +354,6 @@ See [`docs/06_future_plan.md`](docs/06_future_plan.md). Highlights:
 - [`docs/06_future_plan.md`](docs/06_future_plan.md)
 - [`docs/08_authentication.md`](docs/08_authentication.md)
 - [`docs/09_rcon.md`](docs/09_rcon.md)
+- [`docs/10_server_creation.md`](docs/10_server_creation.md)
+- [`docs/11_mod_plugin_management.md`](docs/11_mod_plugin_management.md)
+- [`docs/12_backup_schedule.md`](docs/12_backup_schedule.md)

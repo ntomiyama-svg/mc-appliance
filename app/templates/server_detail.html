@@ -127,6 +127,101 @@
   <div class="logbox mt" id="rcon-output" style="max-height:240px">(no command run yet)</div>
 </div>
 
+{% macro collection(kind, label, items) %}
+<div class="card" id="{{ kind }}">
+  <h3 style="margin-top:0">{{ label }} <span class="muted" style="font-size:12px">({{ items | length }})</span></h3>
+  {% if items %}
+  <table>
+    <thead><tr><th>File</th><th>Size</th><th>State</th><th class="right">Action</th></tr></thead>
+    <tbody>
+      {% for it in items %}
+      <tr>
+        <td>{{ it.name }}</td>
+        <td class="muted" style="font-size:12px">{{ it.size | humansize }}</td>
+        <td>
+          {% if it.enabled %}<span class="badge running">enabled</span>
+          {% else %}<span class="badge stopped">disabled</span>{% endif %}
+        </td>
+        <td class="right">
+          <form class="inline" method="post" action="/servers/{{ server.id }}/{{ kind }}/toggle">
+            <input type="hidden" name="name" value="{{ it.name }}">
+            <button class="btn" type="submit">{{ 'Disable' if it.enabled else 'Enable' }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0">No {{ label | lower }} uploaded yet.</p>
+  {% endif %}
+  <form class="mt" method="post" action="/servers/{{ server.id }}/{{ kind }}/upload" enctype="multipart/form-data">
+    <div class="form-grid" style="max-width:none; grid-template-columns:1fr auto; align-items:end">
+      <div>
+        <label>Upload a .jar to {{ kind }}/</label>
+        <input type="file" name="jar_file" accept=".jar" required>
+      </div>
+      <div><button class="btn primary" type="submit">Upload</button></div>
+    </div>
+  </form>
+  <p class="hint">.jar only. There is no delete — disable removes a mod/plugin from loading by renaming it to <code>.jar.disabled</code>.</p>
+</div>
+{% endmacro %}
+
+<h3 class="section-title">Mods &amp; Plugins</h3>
+<div class="detail-grid">
+  {{ collection("mods", "Mods", mods) }}
+  {{ collection("plugins", "Plugins", plugins) }}
+</div>
+
+<h3 class="section-title">Backup schedule</h3>
+<div class="card" id="schedule">
+  {% if schedule %}
+  <p class="muted" style="margin-top:0">
+    Current:
+    {% if schedule.enabled %}<span class="badge running">enabled</span>{% else %}<span class="badge stopped">disabled</span>{% endif %}
+    · {{ schedule.schedule_type }}
+    {% if schedule.schedule_type == 'daily' %}at {{ schedule.time_of_day }}{% else %}every {{ schedule.interval_minutes }} min{% endif %}
+    · retention {{ schedule.retention_count }}
+    {% if schedule.last_run_at %}· last run {{ schedule.last_run_at | datetimefmt }}{% endif %}
+  </p>
+  {% if schedule.last_status %}<p class="hint" style="margin-top:0">Last result: {{ schedule.last_status }}</p>{% endif %}
+  {% endif %}
+  <form method="post" action="/servers/{{ server.id }}/schedule" class="form-grid" style="max-width:none; grid-template-columns:1fr 1fr">
+    <div style="grid-column:1 / -1">
+      <label class="check"><input type="checkbox" name="enabled" value="true" {{ 'checked' if schedule and schedule.enabled else '' }}> Enable automatic backups</label>
+    </div>
+    <div>
+      <label for="schedule_type">Schedule type</label>
+      <select id="schedule_type" name="schedule_type">
+        <option value="daily" {{ 'selected' if schedule and schedule.schedule_type == 'daily' else '' }}>Daily (at a time of day)</option>
+        <option value="interval" {{ 'selected' if schedule and schedule.schedule_type == 'interval' else '' }}>Interval (every N minutes)</option>
+      </select>
+    </div>
+    <div>
+      <label for="retention_count">Retention count</label>
+      <input type="number" id="retention_count" name="retention_count" min="1"
+             value="{{ schedule.retention_count if schedule else retention_default }}">
+    </div>
+    <div>
+      <label for="time_of_day">Daily time (HH:MM, 24h)</label>
+      <input type="time" id="time_of_day" name="time_of_day" value="{{ schedule.time_of_day if schedule and schedule.time_of_day else '03:30' }}">
+    </div>
+    <div>
+      <label for="interval_minutes">Interval (minutes)</label>
+      <input type="number" id="interval_minutes" name="interval_minutes" min="1"
+             value="{{ schedule.interval_minutes if schedule and schedule.interval_minutes else 60 }}">
+    </div>
+    <div class="btn-row" style="grid-column:1 / -1">
+      <button class="btn primary" type="submit">Save schedule</button>
+    </div>
+    <p class="hint" style="grid-column:1 / -1">
+      Backups run while the app is up. <strong>Retention is recorded but old backups are not pruned in v0.3</strong>
+      (file deletion is intentionally out of scope). Outcomes are written to <code>backup_scheduler.log</code>.
+    </p>
+  </form>
+</div>
+
 <h3 class="section-title">Start command</h3>
 <div class="cmdbox">{{ start_command }}</div>
 

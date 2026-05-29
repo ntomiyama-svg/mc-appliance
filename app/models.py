@@ -95,3 +95,46 @@ class Backup(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     server = relationship("Server", back_populates="backups")
+
+
+# Backup-schedule types.
+SCHEDULE_DAILY = "daily"
+SCHEDULE_INTERVAL = "interval"
+
+
+class BackupSchedule(Base):
+    """A per-server automatic-backup schedule (v0.3).
+
+    The in-process scheduler thread (``services/scheduler_service``) reads these
+    rows and creates backups when one is due. The UI manages a single schedule
+    per server, but the schema does not forbid more.
+
+    NOTE on ``retention_count``: it is stored and displayed, but v0.3 does *not*
+    prune old backups — file deletion is intentionally out of scope (see the
+    v0.1 security model in CLAUDE.md and docs/12_backup_schedule.md).
+    """
+
+    __tablename__ = "backup_schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    server_id = Column(Integer, ForeignKey("servers.id"), nullable=False, index=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    # "daily" (run once a day at time_of_day) or "interval" (every N minutes).
+    schedule_type = Column(String(20), nullable=False, default=SCHEDULE_DAILY)
+    # "HH:MM" 24h local time; only meaningful when schedule_type == "daily".
+    time_of_day = Column(String(5), nullable=True)
+    # Minutes between runs; only meaningful when schedule_type == "interval".
+    interval_minutes = Column(Integer, nullable=True)
+    retention_count = Column(Integer, nullable=False, default=7)
+
+    # Bookkeeping for the scheduler (so it can decide what is "due" and surface
+    # the outcome in the UI). Not part of the minimal spec but harmless.
+    last_run_at = Column(DateTime, nullable=True)
+    last_status = Column(String(255), nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    server = relationship("Server", backref="schedules")

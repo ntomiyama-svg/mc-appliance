@@ -1,0 +1,222 @@
+"""Create a brand-new Minecraft server from the GUI (v0.3).
+
+Unlike :mod:`server_detector` (which inspects an *existing* folder the operator
+points at), this service *creates* the directory, writes ``eula.txt`` and
+``server.properties``, lays down ``mods/`` and ``plugins/``, and stores the
+uploaded server jar — all strictly inside the configured ``SERVERS_DIR``.
+
+Security invariants (mirroring the rest of the app):
+
+* ``server_name`` is restricted to ``[A-Za-z0-9_-]`` so it can never traverse
+  out of ``SERVERS_DIR`` (no ``/``, ``..``, NUL, etc.).
+* Every file is written to a path that is resolved and then checked to live
+  directly under the new server directory — no path-traversal via a crafted
+  upload filename.
+* Only ``.jar`` uploads are accepted and they are always stored as
+  ``server.jar`` (mods/plugins keep their own basename, see ``mod_service``).
+* Nothing here runs as root, shells out, or deletes files.
+"""
+from __future__ import annotations
+
+import re
+import shutil
+import tempfile
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+from fastapi import UploadFile
+
+from app.config import (
+    ALLOWED_UPLOAD_EXTENSIONS,
+    DIFFICULTIES,
+    GAMEMODES,
+    MAX_JAR_UPLOAD_BYTES,
+    SERVERS_DIR,
+)
+
+# server_name allow-list: letters, digits, hyphen, underscore. 1-64 chars.
+_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+class CreationError(Exception):
+    """A user-facing problem while creating a server (rendered back in the form)."""
+
+
+def validate_server_name(name: str) -> str:
+    """Return the sanitized/validated name or raise :class:`CreationError`.
+
+    The name doubles as the on-disk directory name, so it must be strict.
+    """
+    candidate = (name or "").strip()
+    if not candidate:
+        raise CreationError("Server name is required.")
+    if not _NAME_RE.match(candidate):
+        raise CreationError(
+            "Server name may only contain letters, digits, hyphen and underscore "
+            "(1-64 characters)."
+        )
+    return candidate
+
+
+def target_directory(name: str) -> Path:
+    """Resolve the new server's directory under SERVERS_DIR (no traversal)."""
+    base = Path(SERVERS_DIR).resolve()
+    candidate = (base / name).resolve()
+    # Because the name is allow-listed this should always hold, but verify the
+    # resolved path is a *direct* child of SERVERS_DIR before we touch the disk.
+    if candidate.parent != base:
+        raise CreationError("Resolved server path escapes the servers directory.")
+    return candidate
+
+
+def _safe_child(base: Path, filename: str) -> Path:
+    """Resolve ``filename`` directly under ``base`` or raise."""
+    base = base.resolve()
+    candidate = (base / filename).resolve()
+    if candidate.parent != base:
+        raise CreationError("Refusing to write outside the server directory.")
+    return candidate
+
+
+async def buffer_jar_upload(upload: UploadFile) -> tempfile.SpooledTemporaryFile:
+    """Validate and buffer a ``.jar`` upload, enforcing the size cap.
+
+    Returns a rewound spooled temp file (memory-backed for small jars, spilling
+    to a private temp file for large ones). We buffer *before* creating the
+    server directory so an oversized/invalid upload never leaves a half-built
+    tree behind. The caller is responsible for closing the returned buffer.
+    """
+    name = (upload.filename or "").strip()
+    if not name.lower().endswith(ALLOWED_UPLOAD_EXTENSIONS):
+        raise CreationError("Only .jar files may be uploaded.")
+
+    spool = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
+    total = 0
+    try:
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_JAR_UPLOAD_BYTES:
+                raise CreationError(
+                    f"Uploaded jar exceeds the size limit "
+                    f"({MAX_JAR_UPLOAD_BYTES // (1024 * 1024)} MiB)."
+                )
+            spool.write(chunk)
+    except CreationError:
+        spool.close()
+        raise
+    if total == 0:
+        spool.close()
+        raise CreationError("Uploaded jar is empty.")
+    spool.seek(0)
+    return spool
+
+
+def create_directory(name: str) -> Path:
+    """Create the new server directory, erroring if it already exists."""
+    server_dir = target_directory(name)
+    if server_dir.exists():
+        raise CreationError(
+            f"A directory already exists at {server_dir}; choose a different name."
+        )
+    server_dir.mkdir(parents=True, exist_ok=False)
+    return server_dir
+
+
+def write_eula(server_dir: Path, agreed: bool) -> None:
+    """Write eula.txt with ``eula=true`` only when the operator agreed."""
+    if not agreed:
+        raise CreationError(
+            "You must accept the Minecraft EULA before a server can be created."
+        )
+    eula_path = _safe_child(server_dir, "eula.txt")
+    eula_path.write_text(
+        "# Generated by mc-appliance. By setting eula=true you agree to the\n"
+        "# Minecraft EULA (https://aka.ms/MinecraftEULA).\n"
+        "eula=true\n",
+        encoding="utf-8",
+    )
+
+
+def build_properties(params: Dict[str, str], rcon_password: Optional[str]) -> Dict[str, str]:
+    """Build the server.properties key/value mapping from validated form input.
+
+    ``params`` is expected to already hold normalized values for: server_port,
+    motd, max_players, gamemode, difficulty, online_mode (str "true"/"false"),
+    enable_rcon (str "true"/"false") and rcon_port.
+    """
+    props: Dict[str, str] = {
+        "server-port": params["server_port"],
+        "motd": params["motd"],
+        "max-players": params["max_players"],
+        "gamemode": params["gamemode"],
+        "difficulty": params["difficulty"],
+        "online-mode": params["online_mode"],
+        # Always emit a level-name so the file looks like a real one.
+        "level-name": "world",
+        "enable-rcon": params["enable_rcon"],
+    }
+    if params["enable_rcon"] == "true":
+        props["rcon.port"] = params["rcon_port"]
+        if rcon_password:
+            props["rcon.password"] = rcon_password
+    return props
+
+
+def write_properties(server_dir: Path, props: Dict[str, str]) -> None:
+    """Write server.properties as simple ``key=value`` lines.
+
+    The format intentionally matches :mod:`properties_service` so the existing
+    properties editor reads/writes the generated file without surprises.
+    """
+    path = _safe_child(server_dir, "server.properties")
+    lines = ["# Generated by mc-appliance"]
+    lines += [f"{key}={value}" for key, value in props.items()]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def ensure_mod_plugin_dirs(server_dir: Path) -> None:
+    """Create ``mods/`` and ``plugins/`` so the management UI has somewhere to go."""
+    for sub in ("mods", "plugins"):
+        _safe_child(server_dir, sub).mkdir(exist_ok=True)
+
+
+def save_jar(server_dir: Path, buffer: tempfile.SpooledTemporaryFile) -> None:
+    """Persist a previously-buffered jar to ``<server_dir>/server.jar``."""
+    dest = _safe_child(server_dir, "server.jar")
+    buffer.seek(0)
+    with open(dest, "wb") as fh:
+        shutil.copyfileobj(buffer, fh)
+
+
+def normalize_gamemode(value: str) -> str:
+    value = (value or "").strip().lower()
+    return value if value in GAMEMODES else GAMEMODES[0]
+
+
+def normalize_difficulty(value: str) -> str:
+    value = (value or "").strip().lower()
+    return value if value in DIFFICULTIES else DIFFICULTIES[2]  # "normal"
+
+
+def validate_port(raw: str, field: str) -> int:
+    """Parse a 1-65535 port or raise :class:`CreationError` mentioning ``field``."""
+    try:
+        port = int(str(raw).strip())
+    except (TypeError, ValueError):
+        raise CreationError(f"{field} must be a whole number between 1 and 65535.")
+    if not 1 <= port <= 65535:
+        raise CreationError(f"{field} must be between 1 and 65535.")
+    return port
+
+
+def validate_max_players(raw: str) -> int:
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        raise CreationError("Max players must be a whole number.")
+    if not 1 <= value <= 1000:
+        raise CreationError("Max players must be between 1 and 1000.")
+    return value

@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import STATUS_RUNNING, Server
+from app.models import STATUS_RUNNING, BackupSchedule, Server
 from app.services import server_process, system_metrics
 from app.templating import templates
 
@@ -23,6 +23,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             running += 1
 
     metrics = system_metrics.get_metrics()
+    schedules_enabled = (
+        db.query(BackupSchedule).filter(BackupSchedule.enabled.is_(True)).count()
+    )
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -30,6 +33,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "title": "Dashboard",
             "server_count": len(servers),
             "running_count": running,
+            "schedules_enabled": schedules_enabled,
             "metrics": metrics,
         },
     )

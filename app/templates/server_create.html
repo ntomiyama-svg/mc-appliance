@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if errors %}
+<div class="errors">
+  <strong>Could not create server:</strong>
+  <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <p class="muted" style="margin-top:0">
+    Creates a new server directory under <code>{{ servers_dir }}/&lt;name&gt;</code>,
+    writes <code>server.properties</code> and <code>eula.txt</code>, creates
+    <code>mods/</code> and <code>plugins/</code>, and stores the uploaded jar as
+    <code>server.jar</code>. Uploading a jar is optional — you can add one later.
+  </p>
+
+  <form method="post" action="/servers/create" enctype="multipart/form-data">
+    <div class="form-grid" style="max-width:none; grid-template-columns:1fr 1fr">
+      <div>
+        <label for="server_name">Server name</label>
+        <input type="text" id="server_name" name="server_name" value="{{ form.server_name }}"
+               pattern="[A-Za-z0-9_-]{1,64}" required
+               placeholder="survival-01">
+        <div class="hint">Letters, digits, hyphen, underscore only. Used as the folder name.</div>
+      </div>
+      <div>
+        <label for="server_type">Server type</label>
+        <select id="server_type" name="server_type">
+          {% for t in server_types %}
+          <option value="{{ t }}" {{ 'selected' if form.server_type == t else '' }}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label for="server_port">Server port</label>
+        <input type="number" id="server_port" name="server_port" value="{{ form.server_port }}" min="1" max="65535">
+      </div>
+      <div>
+        <label for="max_players">Max players</label>
+        <input type="number" id="max_players" name="max_players" value="{{ form.max_players }}" min="1" max="1000">
+      </div>
+
+      <div>
+        <label for="min_memory">Min memory (-Xms)</label>
+        <input type="text" id="min_memory" name="min_memory" value="{{ form.min_memory }}">
+      </div>
+      <div>
+        <label for="max_memory">Max memory (-Xmx)</label>
+        <input type="text" id="max_memory" name="max_memory" value="{{ form.max_memory }}">
+      </div>
+
+      <div style="grid-column:1 / -1">
+        <label for="motd">MOTD</label>
+        <input type="text" id="motd" name="motd" value="{{ form.motd }}">
+      </div>
+
+      <div>
+        <label for="gamemode">Gamemode</label>
+        <select id="gamemode" name="gamemode">
+          {% for g in gamemodes %}
+          <option value="{{ g }}" {{ 'selected' if form.gamemode == g else '' }}>{{ g }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="difficulty">Difficulty</label>
+        <select id="difficulty" name="difficulty">
+          {% for d in difficulties %}
+          <option value="{{ d }}" {{ 'selected' if form.difficulty == d else '' }}>{{ d }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div style="grid-column:1 / -1">
+        <label class="check"><input type="checkbox" name="online_mode" value="true" {{ 'checked' if form.online_mode else '' }}> online-mode (verify accounts with Mojang)</label>
+      </div>
+    </div>
+
+    <h3 class="section-title">RCON</h3>
+    <div class="form-grid" style="max-width:none; grid-template-columns:1fr 1fr">
+      <div style="grid-column:1 / -1">
+        <label class="check"><input type="checkbox" name="enable_rcon" value="true" {{ 'checked' if form.enable_rcon else '' }}> enable-rcon</label>
+      </div>
+      <div>
+        <label for="rcon_port">rcon.port</label>
+        <input type="number" id="rcon_port" name="rcon_port" value="{{ form.rcon_port }}" min="1" max="65535">
+      </div>
+      <div>
+        <label for="rcon_password">rcon.password</label>
+        <input type="text" id="rcon_password" name="rcon_password" autocomplete="new-password"
+               placeholder="optional — leave blank to set later">
+        <div class="hint">Stored in server.properties + the DB. Never shown again after saving.</div>
+      </div>
+    </div>
+
+    <h3 class="section-title">Server jar &amp; EULA</h3>
+    <div class="form-grid" style="max-width:none">
+      <div>
+        <label for="jar_file">server.jar (optional, .jar only)</label>
+        <input type="file" id="jar_file" name="jar_file" accept=".jar">
+        <div class="hint">Saved as <code>server.jar</code> inside the new folder.</div>
+      </div>
+      <div>
+        <label class="check"><input type="checkbox" name="eula_agree" value="true">
+          I accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener">Minecraft EULA</a> (required)</label>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" type="submit">Create server</button>
+        <a class="btn" href="/servers">Cancel</a>
+      </div>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

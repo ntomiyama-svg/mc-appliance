@@ -105,7 +105,9 @@ python3 -m venv "$VENV_DIR"
 
 # --- 5. State / log directories ----------------------------------------------
 log "Creating state and log directories ..."
-mkdir -p "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR" "$CONFIG_DIR"
+# DATA_DIR/servers holds servers *created* through the GUI (v0.3); it is created
+# here so it has the right ownership up front (chown -R DATA_DIR below covers it).
+mkdir -p "$DATA_DIR" "$DATA_DIR/servers" "$LOG_DIR" "$BACKUP_DIR" "$CONFIG_DIR"
 
 # --- 6. Config file (never clobber an existing one) ---------------------------
 if [[ -f "$CONFIG_FILE" ]]; then
@@ -121,6 +123,9 @@ else
 data_dir: $DATA_DIR
 log_dir: $LOG_DIR
 backup_dir: $BACKUP_DIR
+# Parent directory for servers created via the GUI (v0.3). Defaults to
+# <data_dir>/servers if omitted.
+servers_dir: $DATA_DIR/servers
 
 # Web UI bind address/port (informational: the systemd unit passes --host/--port
 # to uvicorn explicitly). v0.1.x has NO authentication or HTTPS — keep this on a

@@ -26,6 +26,10 @@
 #   LOG_DIR=/var/log/mc-appliance  CONFIG_DIR=/etc/mc-appliance
 #   SKIP_PKG=1      skip OS-package installation (you installed them yourself)
 #   ENABLE_SERVICE=1  also `systemctl enable --now` the service at the end
+#   ENABLE_JAVA_INSTALLER=1  deploy the Java installer helper and write the
+#                   minimal /etc/sudoers.d rule so the GUI "Install Java" buttons
+#                   work. OFF by default — the GUI installer stays disabled until
+#                   an operator opts in. See docs/16_java_installer.md.
 set -euo pipefail
 
 APP_USER="${APP_USER:-mcapp}"
@@ -158,6 +162,50 @@ if [[ "${ENABLE_SERVICE:-0}" == "1" ]]; then
   systemctl enable --now "$SERVICE_NAME"
 fi
 
+# --- 9. (opt-in) Java installer helper + sudoers ------------------------------
+# By default the GUI "Install Java" feature is DISABLED: we deploy nothing here
+# and the web app's sudoers probe finds no rule, so the UI shows "GUI install is
+# not enabled". Set ENABLE_JAVA_INSTALLER=1 to opt in. We then:
+#   * install the helper at a fixed, root-owned path (NOT under the app tree, so
+#     a compromised app cannot rewrite the very script it can run as root), and
+#   * write a MINIMAL sudoers rule: NOPASSWD for that exact script with exactly
+#     one of the five allowed major versions as its only argument. No wildcards.
+JAVA_HELPER_DIR="/usr/local/lib/mc-appliance"
+JAVA_HELPER="$JAVA_HELPER_DIR/install_java_runtime.sh"
+JAVA_SUDOERS="/etc/sudoers.d/mc-appliance-java"
+
+if [[ "${ENABLE_JAVA_INSTALLER:-0}" == "1" ]]; then
+  log "ENABLE_JAVA_INSTALLER=1: deploying Java installer helper ..."
+  mkdir -p "$JAVA_HELPER_DIR"
+  install -m 0755 -o root -g root \
+    "$SCRIPT_DIR/install_java_runtime.sh" "$JAVA_HELPER"
+
+  log "Writing sudoers rule $JAVA_SUDOERS (minimal, per-version NOPASSWD) ..."
+  tmp_sudoers="$(mktemp)"
+  {
+    echo "# Managed by mc-appliance install.sh (ENABLE_JAVA_INSTALLER=1)."
+    echo "# Allows the unprivileged service account to install ONLY the five"
+    echo "# supported Java major versions via the dedicated helper. No wildcards,"
+    echo "# no free-form commands, no arbitrary package names."
+    for v in 8 11 17 21 25; do
+      echo "$APP_USER ALL=(root) NOPASSWD: $JAVA_HELPER $v"
+    done
+  } >"$tmp_sudoers"
+
+  # Validate before installing — a bad sudoers file can lock out sudo entirely.
+  if visudo -c -f "$tmp_sudoers" >/dev/null; then
+    install -m 0440 -o root -g root "$tmp_sudoers" "$JAVA_SUDOERS"
+    rm -f "$tmp_sudoers"
+    log "Java GUI installer enabled for user '$APP_USER'."
+  else
+    rm -f "$tmp_sudoers"
+    err "Generated sudoers file failed validation; NOT installing it."
+    err "The GUI Java installer remains disabled."
+  fi
+else
+  log "ENABLE_JAVA_INSTALLER not set; GUI Java installer stays DISABLED (safe default)."
+fi
+
 # --- Done ---------------------------------------------------------------------
 cat <<EOF
 
@@ -177,5 +225,15 @@ Next steps:
 
 Then open  http://<server-ip>:8080/
 
-Reminder: v0.1.x has NO authentication and NO HTTPS. Keep it on a trusted LAN.
+Java Runtime Manager:
+EOF
+if [[ "${ENABLE_JAVA_INSTALLER:-0}" == "1" ]]; then
+  echo "  GUI Java installer is ENABLED (sudoers: $JAVA_SUDOERS)."
+else
+  echo "  GUI Java installer is DISABLED (default). Re-run with"
+  echo "  ENABLE_JAVA_INSTALLER=1 to allow installing Java from the GUI."
+fi
+cat <<EOF
+
+Reminder: keep mc-appliance on a trusted LAN.
 EOF

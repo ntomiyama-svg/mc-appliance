@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 APP_NAME = "mc-appliance"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 
 # Default location of the optional system config file.
 DEFAULT_CONFIG_PATH = "/etc/mc-appliance/config.yaml"
@@ -273,11 +273,65 @@ VANILLA_HTTP_TIMEOUT_SECONDS = _resolve_int(
     "MC_APPLIANCE_VANILLA_HTTP_TIMEOUT", "vanilla_http_timeout_seconds", 15
 )
 
+# --- Java Runtime Manager / Java installer (v0.6) ------------------------------
+# Java major versions mc-appliance is allowed to detect and (optionally) install
+# through the GUI. This is an ALLOW-LIST: the helper script, the sudoers rules
+# and the API all reject anything outside it. Keep in sync with
+# scripts/install_java_runtime.sh.
+ALLOWED_JAVA_VERSIONS = [8, 11, 17, 21, 25]
+
+# The Java major version recommended for current Minecraft releases. Surfaced on
+# the Java Runtime Manager screen as "Recommended Java".
+JAVA_RECOMMENDED_VERSION = 21
+
+# Path to the privileged installer helper. The web app NEVER installs packages
+# itself — it shells out to this script through sudo, and only for one of the
+# allowed versions above (see docs/16_java_installer.md). A dev checkout points
+# at the in-repo script; a system install points at the deployed copy under
+# /usr/local/lib/mc-appliance (written by install.sh when ENABLE_JAVA_INSTALLER=1).
+JAVA_INSTALLER_SCRIPT = _resolve_path(
+    "MC_APPLIANCE_JAVA_INSTALLER_SCRIPT",
+    "java_installer_script",
+    (BASE_DIR / "scripts" / "install_java_runtime.sh")
+    if IS_DEV
+    else Path("/usr/local/lib/mc-appliance/install_java_runtime.sh"),
+)
+
+# Where GUI-initiated install output is recorded by the app (in addition to the
+# script's own best-effort root-side log). Dev keeps it under ./logs so it never
+# collides with managed server logs; a system install uses /var/log/mc-appliance.
+JAVA_INSTALL_LOG_DIR = (BASE_DIR / "logs") if IS_DEV else LOG_DIR
+JAVA_INSTALL_LOG = JAVA_INSTALL_LOG_DIR / "java_install.log"
+
+# Hard cap on how long a single GUI install may run before we give up waiting.
+# Package installs (especially first-time, with dependency resolution) can be
+# slow, so this is generous; the install keeps running server-side regardless.
+JAVA_INSTALL_TIMEOUT_SECONDS = _resolve_int(
+    "MC_APPLIANCE_JAVA_INSTALL_TIMEOUT", "java_install_timeout_seconds", 600
+)
+
 # Number of trailing lines of latest.log to show.
 LOG_TAIL_LINES = 200
 
+# --- Server console / live log viewer (v0.5) -----------------------------------
+# Default and hard-cap line counts for the console log endpoints. ``lines`` query
+# parameters are clamped into ``[1, CONSOLE_LOG_MAX_LINES]`` so a caller can never
+# ask the server to read an unbounded tail.
+CONSOLE_LOG_DEFAULT_LINES = 300
+CONSOLE_LOG_MAX_LINES = 2000
+# How many trailing lines of each log are scanned for the startup-complete /
+# error markers that drive the detected-state machine (see services/server_console).
+CONSOLE_STATE_SCAN_LINES = 250
+
 # Ensure required directories exist at import time.
-for _d in (DATA_DIR, BACKUP_DIR, MANAGED_LOG_DIR, SERVERS_DIR, JAR_CACHE_DIR):
+for _d in (
+    DATA_DIR,
+    BACKUP_DIR,
+    MANAGED_LOG_DIR,
+    SERVERS_DIR,
+    JAR_CACHE_DIR,
+    JAVA_INSTALL_LOG_DIR,
+):
     os.makedirs(_d, exist_ok=True)
 
 DATABASE_URL = f"sqlite:///{DB_PATH}"

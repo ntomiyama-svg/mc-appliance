@@ -5,7 +5,16 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -34,11 +43,13 @@ from app.services import (
     mod_service,
     properties_service,
     rcon_service,
+    server_console,
     server_creator,
     server_detector,
     server_process,
     vanilla_downloader,
 )
+from app.config import CONSOLE_LOG_DEFAULT_LINES, CONSOLE_LOG_MAX_LINES
 from app.templating import templates
 
 router = APIRouter(prefix="/servers")
@@ -445,6 +456,9 @@ def server_detail(server_id: int, request: Request, db: Session = Depends(get_db
             "plugins": plugins,
             "schedule": schedule,
             "retention_default": DEFAULT_RETENTION_COUNT,
+            # v0.5 console section.
+            "console_default_lines": CONSOLE_LOG_DEFAULT_LINES,
+            "console_max_lines": CONSOLE_LOG_MAX_LINES,
         },
     )
 
@@ -454,6 +468,94 @@ def server_log_raw(server_id: int, db: Session = Depends(get_db)):
     """Plain-text latest.log tail for AJAX refresh."""
     server = _get_server_or_404(db, server_id)
     return HTMLResponse(content=log_service.read_latest_log(server), media_type="text/plain")
+
+
+# ----- Server console / live-log viewer (v0.5) --------------------------------
+#
+# All console routes are admin-only via the global AuthMiddleware. The JSON
+# endpoints back the auto-refreshing Console section on the server detail page
+# (and a standalone /console page); none of them ever expose a path outside the
+# registered server_path or the managed-log directory, nor an RCON password.
+
+
+def _console_context(server: Server) -> dict:
+    """Shared template context for the console page / section."""
+    return {
+        "server": server,
+        "rcon_password_set": bool(server.rcon_password),
+        "allowed_commands": rcon_service.ALLOWED_COMMANDS,
+        "console_default_lines": CONSOLE_LOG_DEFAULT_LINES,
+        "console_max_lines": CONSOLE_LOG_MAX_LINES,
+    }
+
+
+@router.get("/{server_id}/console", response_class=HTMLResponse)
+def console_page(server_id: int, request: Request, db: Session = Depends(get_db)):
+    """Standalone Console page (the same section is also embedded in detail)."""
+    server = _get_server_or_404(db, server_id)
+    server_process.refresh_status(db, server)
+    context = {"title": f"{server.name} · console", **_console_context(server)}
+    return templates.TemplateResponse(request, "server_console.html", context)
+
+
+@router.get("/{server_id}/console/status")
+def console_status(server_id: int, db: Session = Depends(get_db)):
+    """JSON snapshot of process + log state and the derived detected_state."""
+    server = _get_server_or_404(db, server_id)
+    # Evaluate first (reads the DB status as-is), then reconcile the persisted
+    # status so a vanished process is eventually marked stopped without hiding a
+    # crash from this very response.
+    payload = server_console.evaluate(server)
+    server_process.refresh_status(db, server)
+    return JSONResponse(payload)
+
+
+@router.get("/{server_id}/console/latest-log")
+def console_latest_log(
+    server_id: int,
+    lines: int = Query(CONSOLE_LOG_DEFAULT_LINES),
+    db: Session = Depends(get_db),
+):
+    """Tail of the server's own logs/latest.log (registered server_path only)."""
+    server = _get_server_or_404(db, server_id)
+    result = server_console.read_latest_log(server, server_console.clamp_lines(lines))
+    return JSONResponse(result)
+
+
+@router.get("/{server_id}/console/managed-log")
+def console_managed_log(
+    server_id: int,
+    lines: int = Query(CONSOLE_LOG_DEFAULT_LINES),
+    db: Session = Depends(get_db),
+):
+    """Tail of the mc-appliance-managed stdout/stderr log (MANAGED_LOG_DIR only)."""
+    server = _get_server_or_404(db, server_id)
+    result = server_console.read_managed_log(server, server_console.clamp_lines(lines))
+    return JSONResponse(result)
+
+
+@router.post("/{server_id}/console/rcon-command")
+def console_rcon_command(
+    server_id: int, command: str = Form(...), db: Session = Depends(get_db)
+):
+    """Run an allow-listed RCON command from the console (RCON-enabled only)."""
+    server = _get_server_or_404(db, server_id)
+    if not server.rcon_enabled:
+        return JSONResponse(
+            {
+                "ok": False,
+                "message": "RCON is disabled for this server.",
+                "diagnosis": "Enable RCON, set a password, and restart the server "
+                "before sending commands.",
+                "response": None,
+            }
+        )
+    # Reuses the existing allow-list + validation in rcon_service; the password
+    # is never echoed back to the client.
+    result = rcon_service.run_command(server, command)
+    server.rcon_last_status = (result["message"] or "")[:250]
+    db.commit()
+    return JSONResponse(result)
 
 
 def _action_redirect(server_id: int, message: str) -> RedirectResponse:

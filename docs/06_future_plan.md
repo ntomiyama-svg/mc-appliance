@@ -101,6 +101,35 @@ Still pending / carried forward for jar management:
 - Pruning of old cached jars (blocked by the same "no file deletion" rule as
   backup retention).
 
+## v0.5 — Server Console / Live Log Viewer ✅ (delivered)
+
+Delivered in v0.5:
+
+- **Console section** ✅ — per-server live view of PID, real process state, both
+  log sources, and a derived `detected_state`
+  (stopped/starting/running/crashed/unknown). Available inline on the server
+  detail page and as a standalone `/servers/<id>/console` page. See
+  [`14_server_console.md`](14_server_console.md).
+- **Managed process log** ✅ — `server_process.start_server` captures the
+  launched server's stdout/stderr to `<MANAGED_LOG_DIR>/<sanitized_name>.log`
+  with a start banner (command, cwd, PID, time). No secrets are written.
+- **Console API** ✅ — `GET …/console`, `…/console/status`,
+  `…/console/latest-log`, `…/console/managed-log`, and
+  `POST …/console/rcon-command`. All admin-only; `lines` clamped to ≤ 2000; RCON
+  reuses the v0.2 allow-list and never echoes the password.
+
+Scope / deliberate limits (v0.5):
+
+- **Read-only + allow-list only.** The console adds no arbitrary file reads
+  (only `<server_path>/logs/latest.log` and the managed log) and no free-form
+  RCON — it reuses the existing allow-list.
+- **`status` column unchanged.** The new starting/crashed verdict is a separate,
+  read-only `detected_state`; the persisted `status` keeps its v0.1
+  running/stopped semantics so existing flows are untouched.
+- **Polling, not streaming.** Logs refresh every ~5 s (visible-tab only); no
+  WebSocket dependency was added.
+- **No log deletion/rotation** from mc-appliance (the "no file deletion" rule).
+
 ## Later
 
 - **Rocky Linux 9 appliance image**: a packaged, opinionated image where

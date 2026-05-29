@@ -17,6 +17,8 @@ backups/*
 # Logs / backups produced at runtime
 *.log
 *.bak
+# Dev-mode Java installer log directory (./logs/java_install.log)
+logs/
 
 # Editor / OS
 .vscode/

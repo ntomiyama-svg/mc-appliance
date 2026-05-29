@@ -21,6 +21,12 @@ from app.database import Base
 STATUS_STOPPED = "stopped"
 STATUS_RUNNING = "running"
 STATUS_UNKNOWN = "unknown"
+# Console "detected_state" values (v0.5). These describe what the live-log
+# viewer *observes* (process + log markers) and are NOT persisted to the
+# ``status`` column, which keeps its v0.1 running/stopped semantics so the
+# existing start/stop/refresh logic and templates are unaffected.
+STATUS_STARTING = "starting"
+STATUS_CRASHED = "crashed"
 
 
 class Server(Base):

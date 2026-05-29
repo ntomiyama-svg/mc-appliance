@@ -148,7 +148,22 @@ tr:last-child td { border-bottom: none; }
 .badge.running { background: #15351f; color: #5ad37a; border: 1px solid #2ea043; }
 .badge.stopped { background: #30262a; color: #c9a; border: 1px solid #5c4750; }
 .badge.unknown { background: #2a2a30; color: var(--muted); border: 1px solid var(--border); }
+.badge.starting { background: #2c2a16; color: #e3c14a; border: 1px solid var(--warn); }
+.badge.crashed { background: #3a1d1b; color: #ff938c; border: 1px solid var(--danger); }
 .badge.type { background: #14283d; color: #79c0ff; border: 1px solid #265e8a; }
+
+/* Console / live-log viewer (v0.5) */
+.console-toolbar { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; }
+.console-controls { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.console-controls .check { font-size: 13px; }
+.console-controls select { width: auto; }
+.tabs { display: flex; gap: 4px; }
+.tab {
+  background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
+  border-bottom: none; border-radius: 8px 8px 0 0; padding: 6px 14px;
+  font-size: 13px; cursor: pointer;
+}
+.tab.active { background: #0a0e12; color: var(--text); border-color: var(--border); }
 
 /* Buttons */
 .btn {
@@ -162,6 +177,7 @@ tr:last-child td { border-bottom: none; }
   font-size: 13px;
 }
 .btn:hover { filter: brightness(1.15); text-decoration: none; }
+.btn:disabled, .btn[disabled] { opacity: 0.45; cursor: not-allowed; filter: none; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #06210e; font-weight: 600; }
 .btn.start { background: #1f7a33; border-color: #2ea043; color: #fff; }
 .btn.stop { background: #7a2420; border-color: var(--danger); color: #fff; }

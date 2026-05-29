@@ -1,0 +1,78 @@
+{# Reusable Console / live-log viewer section.
+   Embedded in server_detail.html and rendered standalone by server_console.html.
+   All data is fetched (and refreshed) by the console code in static/js/main.js,
+   keyed off the #console container's data-* attributes. #}
+<div class="console"
+     id="console"
+     data-server-id="{{ server.id }}"
+     data-default-lines="{{ console_default_lines }}"
+     data-rcon-enabled="{{ '1' if server.rcon_enabled else '0' }}">
+
+  <div class="card">
+    <h3 style="margin-top:0">Live status
+      <span class="muted" style="font-size:12px">(auto-detected)</span>
+    </h3>
+    <table class="kv">
+      <tr><td>Detected state</td>
+        <td><span class="badge unknown" id="con-state">…</span>
+            <span class="muted" id="con-reason" style="font-size:12px"></span></td></tr>
+      <tr><td>DB status</td><td id="con-db-status">…</td></tr>
+      <tr><td>Actual status</td><td id="con-actual-status">…</td></tr>
+      <tr><td>PID</td><td id="con-pid">…</td></tr>
+      <tr><td>Process exists</td><td id="con-proc">…</td></tr>
+      <tr><td>latest.log updated</td><td id="con-latest-mtime">…</td></tr>
+      <tr><td>Managed log updated</td><td id="con-managed-mtime">…</td></tr>
+    </table>
+    <p class="hint" id="con-status-error" style="display:none; color:var(--danger)"></p>
+  </div>
+
+  <div class="card mt">
+    <div class="console-toolbar">
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" data-log="latest">Minecraft latest.log</button>
+        <button type="button" class="tab" data-log="managed">Managed process log</button>
+      </div>
+      <div class="console-controls">
+        <label class="check">Lines
+          <select id="con-lines">
+            <option value="100">100</option>
+            <option value="300" selected>300</option>
+            <option value="1000">1000</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="con-autorefresh" checked> Auto-refresh (5s)</label>
+        <label class="check"><input type="checkbox" id="con-autoscroll" checked> Auto-scroll</label>
+        <button type="button" class="btn" id="con-refresh">↻ Refresh</button>
+      </div>
+    </div>
+    <div class="logbox mt" id="console-logbox">Loading…</div>
+  </div>
+
+  <div class="card mt" id="console-rcon">
+    <h3 style="margin-top:0">RCON command
+      <span class="muted" style="font-size:12px">(allow-list only)</span>
+    </h3>
+    {% if server.rcon_enabled %}
+    <div class="btn-row" style="flex-wrap:wrap; gap:6px">
+      <button class="btn" type="button" data-con-cmd="list">list</button>
+      <button class="btn" type="button" data-con-cmd="save-all flush">save-all</button>
+      <button class="btn" type="button" data-con-cmd="whitelist list">whitelist list</button>
+    </div>
+    <div class="form-grid mt" style="max-width:none">
+      <div>
+        <label>Send an allow-listed command</label>
+        <input type="text" id="con-cmd-input" placeholder="e.g.  say hello   |   whitelist add Steve">
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" type="button" id="con-send-btn">Send</button>
+      </div>
+    </div>
+    <p class="hint">Allowed: {{ allowed_commands | join(", ") }}. Arbitrary commands are intentionally disabled. The RCON password is never shown.</p>
+    <div class="logbox mt" id="con-rcon-output" style="max-height:200px">(no command run yet)</div>
+    {% else %}
+    <p class="hint">RCON is disabled for this server, so the command box is unavailable.
+       Enable RCON, set a password, and restart the Minecraft server to use it.</p>
+    <input type="text" placeholder="RCON disabled" disabled>
+    {% endif %}
+  </div>
+</div>

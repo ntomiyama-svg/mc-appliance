@@ -154,6 +154,166 @@ function initRcon() {
   });
 }
 
+// ----- Server console / live-log viewer (server detail + /console page) -----
+
+// The console JSON endpoints live under /servers/... (not /api/...), so an
+// expired session is bounced to /login as an HTML redirect rather than a 401.
+// We detect both forms and send the user to the login screen.
+function consoleAuthRedirect() {
+  window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname);
+}
+
+function consoleFetchJSON(url, opts) {
+  return fetch(url, opts).then((r) => {
+    if (r.status === 401) {
+      consoleAuthRedirect();
+      throw new Error("auth");
+    }
+    if (r.redirected && /\/login/.test(r.url)) {
+      consoleAuthRedirect();
+      throw new Error("auth");
+    }
+    const ct = r.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      if (/\/login/.test(r.url)) {
+        consoleAuthRedirect();
+        throw new Error("auth");
+      }
+      throw new Error("Unexpected response (HTTP " + r.status + "). Try reloading.");
+    }
+    if (r.status >= 500) {
+      throw new Error("Server error (HTTP " + r.status + ").");
+    }
+    return r.json();
+  });
+}
+
+function conSetText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function initConsole() {
+  const root = document.getElementById("console");
+  if (!root) return;
+
+  const id = root.dataset.serverId;
+  const rconEnabled = root.dataset.rconEnabled === "1";
+  const logbox = document.getElementById("console-logbox");
+  const linesSel = document.getElementById("con-lines");
+  const autoRefresh = document.getElementById("con-autorefresh");
+  const autoScroll = document.getElementById("con-autoscroll");
+  let activeLog = "latest";
+
+  function lineCount() {
+    return linesSel ? linesSel.value : "300";
+  }
+
+  function showStatusError(msg) {
+    const el = document.getElementById("con-status-error");
+    if (el) {
+      el.textContent = msg;
+      el.style.display = "";
+    }
+  }
+  function hideStatusError() {
+    const el = document.getElementById("con-status-error");
+    if (el) el.style.display = "none";
+  }
+
+  function renderStatus(s) {
+    hideStatusError();
+    const stateEl = document.getElementById("con-state");
+    if (stateEl) {
+      stateEl.textContent = s.detected_state || "unknown";
+      stateEl.className = "badge " + (s.detected_state || "unknown");
+    }
+    conSetText("con-reason", s.detected_reason || "");
+    conSetText("con-db-status", s.db_status || "—");
+    conSetText("con-actual-status", s.actual_status || "—");
+    conSetText("con-pid", s.pid != null ? s.pid : "—");
+    conSetText("con-proc", s.process_exists ? "yes" : "no");
+    conSetText("con-latest-mtime", s.latest_log_exists ? (s.latest_log_mtime || "—") : "no file");
+    conSetText("con-managed-mtime", s.managed_log_exists ? (s.managed_log_mtime || "—") : "no file");
+  }
+
+  function refreshStatus() {
+    consoleFetchJSON("/servers/" + id + "/console/status")
+      .then(renderStatus)
+      .catch((e) => { if (e.message !== "auth") showStatusError(e.message); });
+  }
+
+  function refreshLog() {
+    if (!logbox) return;
+    const path = activeLog === "managed" ? "managed-log" : "latest-log";
+    consoleFetchJSON("/servers/" + id + "/console/" + path + "?lines=" + lineCount())
+      .then((r) => {
+        logbox.textContent = r.text || "";
+        if (autoScroll && autoScroll.checked) logbox.scrollTop = logbox.scrollHeight;
+      })
+      .catch((e) => { if (e.message !== "auth") logbox.textContent = "Error loading log: " + e.message; });
+  }
+
+  function refreshAll() {
+    refreshStatus();
+    refreshLog();
+  }
+
+  // Tabs (latest.log / managed log).
+  root.querySelectorAll(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      root.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      activeLog = tab.dataset.log;
+      refreshLog();
+    });
+  });
+
+  const refreshBtn = document.getElementById("con-refresh");
+  if (refreshBtn) refreshBtn.addEventListener("click", refreshAll);
+  if (linesSel) linesSel.addEventListener("change", refreshLog);
+
+  // RCON command box (only present/active when RCON is enabled).
+  if (rconEnabled) {
+    function consoleSend(cmd) {
+      if (!cmd) return;
+      rconShow("con-rcon-output", { ok: true, message: "Running: " + cmd });
+      const body = new URLSearchParams({ command: cmd });
+      consoleFetchJSON("/servers/" + id + "/console/rcon-command", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      })
+        .then((res) => rconShow("con-rcon-output", res))
+        .catch((e) => { if (e.message !== "auth") rconShow("con-rcon-output", { ok: false, message: e.message }); });
+    }
+
+    const sendBtn = document.getElementById("con-send-btn");
+    const input = document.getElementById("con-cmd-input");
+    if (sendBtn) sendBtn.addEventListener("click", () => consoleSend(input ? input.value.trim() : ""));
+    if (input) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          consoleSend(input.value.trim());
+        }
+      });
+    }
+    root.querySelectorAll("[data-con-cmd]").forEach((btn) => {
+      btn.addEventListener("click", () => consoleSend(btn.dataset.conCmd));
+    });
+  }
+
+  // Initial paint, then a 5s tick that only runs while the page is visible and
+  // auto-refresh is on.
+  refreshAll();
+  setInterval(() => {
+    if (document.hidden) return;
+    if (autoRefresh && !autoRefresh.checked) return;
+    refreshAll();
+  }, 5000);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   refreshMetrics();
   setInterval(refreshMetrics, 5000);
@@ -165,4 +325,5 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   initRcon();
+  initConsole();
 });

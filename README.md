@@ -24,9 +24,15 @@ It lets you:
 - Auto-detect server type, jars, world, mods, plugins, etc.
 - Start / stop / restart servers (Python-managed subprocess, PID stored in DB)
 - View server status and the tail of `logs/latest.log`
+- **Server console (v0.5):** live status (PID, real process state, detected
+  state), both `latest.log` and the mc-appliance-managed stdout/stderr log, and
+  the allow-listed RCON command box — see [Server console](#server-console-v05)
 - View and edit `server.properties` (with automatic `.bak` backup)
 - Create manual zip backups
 - See host system info (OS, Python, Java, disk, IP)
+- **Java Runtime Manager (v0.6):** detect installed Java runtimes and, when
+  opted in, install Java 8 / 11 / 17 / 21 / 25 from the GUI via a locked-down
+  helper — see [Java Runtime Manager](#java-runtime-manager--java-installer-v06)
 
 ## Supported OS
 
@@ -225,6 +231,79 @@ stop the server gracefully. Full details are in
 When RCON is enabled, **Stop** uses RCON `save-all` + `stop` first and only
 falls back to `SIGTERM` if RCON is unavailable or fails; backups run
 `save-all flush` beforehand so the snapshot is consistent.
+
+## Server console (v0.5)
+
+Since **v0.5** each server has a **Console** section (on the server detail page,
+and as a standalone `/servers/<id>/console` page) that shows — live, in the
+browser — whether the server is *really* running. Full details:
+[`docs/14_server_console.md`](docs/14_server_console.md).
+
+It shows:
+
+- **Live status** — a detected state (`stopped` / `starting` / `running` /
+  `crashed` / `unknown`) derived from the real process *and* the logs, plus the
+  PID, whether the process actually exists, and each log's last-modified time.
+- **Two logs, switchable:**
+  - **Minecraft `latest.log`** — the server's own log
+    (`<server_path>/logs/latest.log`).
+  - **Managed process log** — the stdout/stderr mc-appliance captured when *it*
+    launched the server, under `MANAGED_LOG_DIR` (default
+    `<DATA_DIR>/server_logs/<name>.log`; a system install points this at
+    `/var/log/mc-appliance/server_logs/`). Set `MC_APPLIANCE_LOG_DIR=./logs` in
+    dev for `./logs/server_logs/<name>.log`. This is where a JVM-level startup
+    failure (bad Java path, OOM) shows up even when `latest.log` is empty.
+- **Controls** — auto-refresh (~5 s, only while the tab is visible), auto-scroll,
+  a manual refresh, and a 100/300/1000 line selector (capped at 2000).
+- **RCON command box** — only when RCON is enabled, and only the **v0.2
+  allow-list** (no free-form commands). The password is never displayed.
+
+How to confirm a server is up: open the Console, check `detected_state =
+running` with a PID and `process_exists = yes`, and (if RCON is on) run `list`.
+
+> The console is **read-only** beyond the existing RCON allow-list. It reads only
+> `<server_path>/logs/latest.log` and the managed log — no arbitrary file access
+> — every endpoint requires login, and the RCON password is never logged or
+> shown. The persisted server `status` is unchanged; the starting/crashed
+> verdict is a separate, detection-only signal.
+
+## Java Runtime Manager / Java installer (v0.6)
+
+The **Java Runtimes** screen (sidebar, or **System → Java Runtime Manager**)
+shows the Java runtimes installed on the host, the **recommended** Java, the
+Java **required** by your registered servers (inferred from their Minecraft
+version), and which supported versions are **not installed**. Supported major
+versions are **8 / 11 / 17 / 21 / 25**. Full details:
+[`docs/16_java_installer.md`](docs/16_java_installer.md).
+
+When enabled, the screen offers **Install Java 8 / 11 / 17 / 21 / 25** buttons
+(login required). The web app never installs packages itself: it shells out —
+through `sudo` — to a single fixed helper, `scripts/install_java_runtime.sh`,
+passing **only** the Java major version. No arbitrary commands, no arbitrary
+package names.
+
+> **GUI install is DISABLED by default.** The manager is read-only until an
+> operator opts in. Re-run the system installer with `ENABLE_JAVA_INSTALLER=1`
+> to deploy the helper and write a **minimal `sudoers`** rule (one NOPASSWD line
+> per allowed version, no wildcards):
+>
+> ```bash
+> sudo ENABLE_JAVA_INSTALLER=1 bash scripts/install.sh
+> ```
+>
+> Until then the page shows *"GUI install is not enabled"* and still displays a
+> **manual install command** for each version.
+
+A few cautions:
+
+- **Not every Java version is packaged on every distribution.** In particular
+  **Java 25 may not be available** yet on your distro. An install that fails for
+  a missing package is reported as an error with the package-manager output.
+- The installer is **additive** — it never changes the system default `java`.
+  Each server keeps selecting its own **`java_path`**.
+- Install output is logged to `/var/log/mc-appliance/java_install.log`
+  (`./logs/java_install.log` in a dev checkout) and shown in the GUI. No secrets
+  are logged.
 
 ## Creating a new Minecraft server (v0.3)
 

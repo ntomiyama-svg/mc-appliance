@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <p class="muted" style="margin-top:0">
+    Detect the Java runtimes installed on this host and, when the GUI installer
+    has been enabled by an administrator, install one of the supported Java
+    versions. mc-appliance never switches the system default Java — each server
+    chooses its own <code>java_path</code>. Supported versions:
+    <strong>{{ info.allowed_versions | join(' / ') }}</strong>.
+  </p>
+
+  {% if info.installer_enabled %}
+  <div class="flash" style="background:#15351f;border-color:#2ea043;color:#5ad37a">
+    ✓ GUI install is enabled on this host.
+  </div>
+  {% else %}
+  <div class="flash">
+    GUI install is not enabled. Installs run only when an administrator has
+    configured the minimal sudoers rule — see
+    <code>docs/16_java_installer.md</code>. You can still install Java manually
+    using the commands shown below.
+  </div>
+  {% endif %}
+
+  <table class="kv">
+    <tr><td>OS family</td><td>
+      {% if info.os_family == 'rhel' %}Rocky / RHEL (dnf)
+      {% elif info.os_family == 'debian' %}Ubuntu / Debian (apt)
+      {% else %}<span class="muted">unknown — no dnf/apt detected</span>{% endif %}
+    </td></tr>
+    <tr><td>Recommended Java</td><td><strong>Java {{ info.recommended_version }}</strong></td></tr>
+    <tr><td>Required Java</td><td>
+      {% for v in info.required_versions %}<span class="badge type">Java {{ v }}</span> {% endfor %}
+      <span class="muted" style="font-size:12px">(inferred from registered servers)</span>
+    </td></tr>
+    <tr><td>Installed</td><td>
+      {% if info.installed_versions %}
+        {% for v in info.installed_versions %}<span class="badge running">Java {{ v }}</span> {% endfor %}
+      {% else %}<span class="muted">none detected</span>{% endif %}
+    </td></tr>
+    <tr><td>Not installed</td><td>
+      {% if info.not_installed_versions %}
+        {% for v in info.not_installed_versions %}<span class="badge stopped">Java {{ v }}</span> {% endfor %}
+      {% else %}<span class="muted">all supported versions are installed</span>{% endif %}
+    </td></tr>
+  </table>
+
+  <div class="btn-row mt">
+    <button class="btn" type="button" id="java-rescan-btn">Rescan</button>
+  </div>
+  <div class="logbox mt" id="java-output" style="max-height:260px">(no action run yet)</div>
+</div>
+
+<div class="card" id="java-versions" data-installer-enabled="{{ '1' if info.installer_enabled else '0' }}">
+  <h3 style="margin-top:0">Supported Java versions</h3>
+  <table>
+    <thead>
+      <tr><th>Version</th><th>State</th><th>Package</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      {% for v in info.versions %}
+      <tr>
+        <td>
+          <strong>Java {{ v.version }}</strong>
+          {% if v.recommended %}<span class="badge type">recommended</span>{% endif %}
+          {% if v.required %}<span class="badge starting">required</span>{% endif %}
+        </td>
+        <td>
+          {% if v.installed %}<span class="badge running">installed</span>
+          {% else %}<span class="badge stopped">not installed</span>{% endif %}
+        </td>
+        <td class="muted" style="font-size:12px">
+          {% if v.package %}<code>{{ v.package }}</code>
+          {% else %}<span class="muted">n/a for this OS</span>{% endif %}
+        </td>
+        <td>
+          {% if v.installed %}
+            <span class="muted">—</span>
+          {% elif v.can_install %}
+            <button class="btn primary java-install-btn" type="button"
+                    data-version="{{ v.version }}">Install Java {{ v.version }}</button>
+          {% else %}
+            <button class="btn java-install-btn" type="button"
+                    data-version="{{ v.version }}" disabled
+                    title="GUI install is not enabled">Install Java {{ v.version }}</button>
+          {% endif %}
+          {% if v.manual_command and not v.installed %}
+          <div class="muted" style="font-size:12px;margin-top:4px">
+            Manual: <code>{{ v.manual_command }}</code>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:12px;margin-bottom:0">
+    Note: some versions are not packaged by every distribution (for example
+    Java 25 may be unavailable). An install that fails for a missing package is
+    reported as an error with the package-manager output.
+  </p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Detected Java runtimes <span class="muted" style="font-size:12px">({{ info.runtimes | length }})</span></h3>
+  {% if info.runtimes %}
+  <table>
+    <thead>
+      <tr><th>Major</th><th>Path</th><th>Version</th></tr>
+    </thead>
+    <tbody>
+      {% for rt in info.runtimes %}
+      <tr>
+        <td>{% if rt.major %}<strong>{{ rt.major }}</strong>{% else %}<span class="muted">?</span>{% endif %}</td>
+        <td class="muted" style="font-size:12px"><code>{{ rt.path }}</code></td>
+        <td class="muted" style="font-size:12px">{{ rt.version_string }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0">No Java runtimes detected on this host.</p>
+  {% endif %}
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const out = document.getElementById("java-output");
+  function show(text) { if (out) out.textContent = text; }
+
+  // POST helper that surfaces an expired session (HTML redirect to /login)
+  // instead of trying to parse it as JSON — mirrors the jar-cache page.
+  function post(path, params) {
+    const body = new URLSearchParams(params || {});
+    return fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    }).then((r) => {
+      const ct = r.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        throw new Error("Not authenticated or unexpected response — try reloading.");
+      }
+      return r.json();
+    });
+  }
+
+  function renderInstall(res) {
+    let text = (res.ok ? "✓ " : "✗ ") + (res.message || "");
+    if (res.command) text += "\n\n$ " + res.command;
+    const body = [res.stdout, res.stderr].filter(Boolean).join("\n");
+    if (body) text += "\n\n" + body;
+    show(text);
+  }
+
+  document.querySelectorAll(".java-install-btn").forEach((btn) => {
+    if (btn.disabled) return;
+    btn.addEventListener("click", () => {
+      const version = btn.dataset.version;
+      if (!window.confirm("Install Java " + version + " on this host?")) return;
+      btn.disabled = true;
+      show("Installing Java " + version + "… this may take a minute.");
+      post("/system/java/install", { java_version: version })
+        .then((res) => {
+          renderInstall(res);
+          // On success reload so the tables reflect the new runtime.
+          if (res.ok) setTimeout(() => window.location.reload(), 1500);
+          else btn.disabled = false;
+        })
+        .catch((e) => { show("✗ " + e.message); btn.disabled = false; });
+    });
+  });
+
+  const rescanBtn = document.getElementById("java-rescan-btn");
+  if (rescanBtn) rescanBtn.addEventListener("click", () => {
+    show("Rescanning…");
+    post("/system/java/rescan", {})
+      .then(() => window.location.reload())
+      .catch((e) => show("✗ " + e.message));
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="btn-row" style="margin-bottom:18px">
+  <a class="btn" href="/servers/{{ server.id }}">← Back to {{ server.name }}</a>
+</div>
+
+{% include "_console.html" %}
+
+{% endblock %}

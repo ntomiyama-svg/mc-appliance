@@ -11,6 +11,7 @@ import os
 import signal
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -18,7 +19,6 @@ import psutil
 from sqlalchemy.orm import Session
 
 from app.config import (
-    MANAGED_LOG_DIR,
     RCON_STOP_TIMEOUT_SECONDS,
     STOP_TIMEOUT_SECONDS,
 )
@@ -89,9 +89,28 @@ def start_server(db: Session, server: Server) -> str:
 
     cmd = build_start_command(server)
 
-    # Capture stdout/stderr in a managed log file inside data/server_logs/.
-    log_path = MANAGED_LOG_DIR / f"server_{server.id}.log"
+    # Capture stdout/stderr in a managed log file under MANAGED_LOG_DIR. The
+    # filename is derived from a sanitised server name (no path traversal) — see
+    # services/server_console.managed_log_path. Local import keeps the module
+    # import graph acyclic (server_console imports this module).
+    from app.services import server_console
+
+    log_path = server_console.managed_log_path(server)
     log_fh = open(log_path, "ab")
+
+    # Write a small banner so the managed log records *how* the server was
+    # launched. The start command is only java + memory flags + the jar name —
+    # it never contains the RCON password or any other secret.
+    banner = (
+        f"\n===== mc-appliance start {datetime.now():%Y-%m-%d %H:%M:%S} =====\n"
+        f"command: {' '.join(cmd)}\n"
+        f"cwd: {server_dir}\n"
+    )
+    try:
+        log_fh.write(banner.encode("utf-8", errors="replace"))
+        log_fh.flush()
+    except OSError:
+        pass  # The banner is best-effort; never block a start on it.
 
     # start_new_session detaches the child into its own process group so a
     # restart of the web app does not take the server down with it.
@@ -104,10 +123,16 @@ def start_server(db: Session, server: Server) -> str:
         start_new_session=True,
     )
 
+    # Record the PID now so the banner can name it, then append it.
     server.pid = proc.pid
     server.status = STATUS_RUNNING
     server.start_command = " ".join(cmd)
     db.commit()
+    try:
+        log_fh.write(f"pid: {proc.pid}\n".encode("utf-8", errors="replace"))
+        log_fh.flush()
+    except OSError:
+        pass
     return f"Server started (PID {proc.pid})."
 
 

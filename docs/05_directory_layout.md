@@ -42,12 +42,31 @@ mc-appliance/
 ├── docs/                       this documentation
 ├── scripts/
 │   ├── dev_run.sh              venv + deps + uvicorn --reload
-│   └── install_rocky9.sh       Rocky 9 dev package install (non-destructive)
+│   ├── install.sh              system installer (systemd service; root)
+│   ├── install_rocky9.sh       Rocky 9 OS-package install (dnf)
+│   └── mc-appliance.service    systemd unit template (User=mcapp)
 ├── requirements.txt
 ├── README.md
 ├── CLAUDE.md
 └── .gitignore
 ```
+
+## System-install layout (v0.1.1)
+
+When installed via `scripts/install.sh`, storage moves out of the code tree to
+FHS-style locations (see `docs/07_install_systemd.md` for details):
+
+```
+/opt/mc-appliance/            app code (root:mcapp, read-only to the service)
+/opt/mc-appliance/.venv/      virtualenv
+/var/lib/mc-appliance/        SQLite DB + data (mcapp)
+/var/lib/mc-appliance/backups generated zip backups (mcapp)
+/var/log/mc-appliance/        logs incl. server_logs/ (mcapp)
+/etc/mc-appliance/config.yaml configuration (root:mcapp, 640)
+```
+
+`app/config.py` resolves these from env vars / `config.yaml`, defaulting to the
+project-relative dev layout below when neither is present.
 
 ## Notes
 

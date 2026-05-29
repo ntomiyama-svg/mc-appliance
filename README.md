@@ -79,6 +79,48 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 > The app **refuses to start as root** by design. Run it as a normal user that
 > has read/write access to your Minecraft server folders.
 
+## Installing as a system service (systemd)
+
+For a persistent install that survives reboots, use the installer. It runs as
+root only to set things up — the **web app itself runs as the unprivileged
+`mcapp` user**, never as root.
+
+```bash
+sudo bash scripts/install.sh
+```
+
+This will:
+
+- install OS packages (`dnf` on Rocky/RHEL, `apt` on Debian/Ubuntu)
+- create the system user **`mcapp`**
+- deploy the app to **`/opt/mc-appliance`** (owned by root, read-only to the service)
+- build a virtualenv at **`/opt/mc-appliance/.venv`** and install requirements
+- create **`/var/lib/mc-appliance`** (DB / data) and **`/var/log/mc-appliance`** (logs)
+- write a default **`/etc/mc-appliance/config.yaml`** (left untouched if it exists)
+- install the **`mc-appliance.service`** systemd unit
+
+> Primary tested target is **Rocky Linux 9**. Debian/Ubuntu uses `apt` and is
+> supported by design but less exercised. Useful flags:
+> `SKIP_PKG=1` (skip OS packages), `ENABLE_SERVICE=1` (enable + start at the end).
+
+Then manage it with systemctl:
+
+```bash
+sudo systemctl enable --now mc-appliance     # start now and on boot
+systemctl status mc-appliance
+sudo systemctl restart mc-appliance
+sudo systemctl stop mc-appliance
+journalctl -u mc-appliance -f                # follow service logs
+```
+
+The service binds `0.0.0.0:8080`. Edit `/etc/mc-appliance/config.yaml` to change
+storage paths; the unit passes `--host`/`--port` to uvicorn explicitly (edit the
+unit, or use a drop-in, to change the bind).
+
+> **Scope (v0.1.1):** this manages *the mc-appliance web app* as a service only.
+> Minecraft servers are still launched as managed subprocesses (see below) — they
+> are **not** turned into systemd units yet. Auth, HTTPS and RCON are still absent.
+
 ## Accessing the web UI
 
 Open a browser to:
@@ -187,7 +229,9 @@ never copies or moves your existing data during registration.
 - No HTTPS (login/session travel in cleartext)
 - No multi-user accounts, roles, or user-management UI (single admin only)
 - No CSRF tokens (only `SameSite=Lax` cookie mitigation)
-- No systemd integration
+- No **per-server** systemd integration (the app *itself* can run as a systemd
+  service — see "Installing as a system service" — but Minecraft servers are
+  still managed as subprocesses)
 - No RCON (graceful in-game stop / commands)
 - No sudo / privileged operations
 - No `SIGKILL` / force-kill

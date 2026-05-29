@@ -1,0 +1,32 @@
+[Unit]
+Description=mc-appliance - web GUI for managing Minecraft servers
+Documentation=file:///opt/mc-appliance/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The web app must NEVER run as root (this is also enforced in app code, which
+# aborts startup if euid == 0). It runs as a dedicated unprivileged user.
+User=mcapp
+Group=mcapp
+WorkingDirectory=/opt/mc-appliance
+Environment=MC_APPLIANCE_CONFIG=/etc/mc-appliance/config.yaml
+ExecStart=/opt/mc-appliance/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=3
+
+# --- Light hardening ---------------------------------------------------------
+# Kept intentionally modest for v0.1.1: the app reads/writes *registered*
+# Minecraft server folders that may live anywhere on the host, so we cannot
+# lock the filesystem down too far yet. Tighter sandboxing is a v0.2 item.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+# Persistent state and logs are the only paths the service must write to that
+# ProtectSystem=full does not already leave writable.
+ReadWritePaths=/var/lib/mc-appliance /var/log/mc-appliance
+
+[Install]
+WantedBy=multi-user.target

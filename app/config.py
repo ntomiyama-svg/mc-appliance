@@ -39,4 +39,18 @@ for _d in (DATA_DIR, BACKUP_DIR, MANAGED_LOG_DIR):
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 APP_NAME = "mc-appliance"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.2"
+
+# Secret key used to sign session cookies (Starlette SessionMiddleware).
+#
+# SECURITY: the fallback below is for DEVELOPMENT ONLY. Anyone who knows it can
+# forge admin sessions. In any real deployment, set a long random value via the
+# MC_APPLIANCE_SECRET_KEY environment variable, e.g.:
+#
+#     export MC_APPLIANCE_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+#
+# See README "Security notes" and docs/08_authentication.md.
+SECRET_KEY = os.environ.get(
+    "MC_APPLIANCE_SECRET_KEY",
+    "dev-insecure-change-me-please-set-MC_APPLIANCE_SECRET_KEY",
+)

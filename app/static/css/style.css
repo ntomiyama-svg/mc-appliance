@@ -39,6 +39,39 @@ a:hover { text-decoration: underline; }
 .brand-name { font-weight: 700; font-size: 18px; color: #fff; }
 .brand-ver { font-size: 12px; color: #cdeccd; }
 
+/* Topbar user / logout (right side) */
+.topbar-user { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.topbar-user .user-name { color: #dff3df; font-size: 13px; }
+.topbar-user .logout {
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, .35);
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.topbar-user .logout:hover { background: rgba(255, 255, 255, .12); text-decoration: none; }
+
+/* Login page */
+.login-body { display: flex; min-height: 100vh; align-items: center; justify-content: center; }
+.login-wrap { width: 100%; max-width: 360px; padding: 20px; }
+.login-card { padding: 26px 24px; }
+.login-brand { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.login-title { font-size: 18px; margin: 6px 0 18px; }
+.login-form { display: flex; flex-direction: column; gap: 14px; }
+.login-form .field { display: flex; flex-direction: column; gap: 6px; }
+.login-form .field span { color: var(--muted); font-size: 13px; }
+.login-form input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 9px 11px;
+  font-size: 14px;
+}
+.login-form input:focus { outline: none; border-color: var(--accent-2); }
+.login-submit { width: 100%; margin-top: 4px; padding: 10px; }
+.login-foot { text-align: center; margin-top: 16px; font-size: 12px; }
+
 /* Layout */
 .layout { display: flex; min-height: calc(100vh - 56px); }
 .sidebar {

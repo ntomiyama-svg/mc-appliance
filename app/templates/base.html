@@ -13,6 +13,13 @@
       <span class="brand-name">{{ app_name }}</span>
       <span class="brand-ver">v{{ app_version }}</span>
     </div>
+    {% set current_user = request.session.get('admin_username') %}
+    {% if current_user %}
+    <div class="topbar-user">
+      <span class="user-name">👤 {{ current_user }}</span>
+      <a class="logout" href="/logout">Logout</a>
+    </div>
+    {% endif %}
   </header>
 
   <div class="layout">

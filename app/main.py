@@ -9,13 +9,29 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import APP_NAME, APP_VERSION, BASE_DIR
+from app.auth import AuthMiddleware
+from app.config import APP_NAME, APP_VERSION, BASE_DIR, SECRET_KEY
 from app.database import init_db
-from app.routers import backups, dashboard, servers, system
+from app.routers import auth, backups, dashboard, servers, system
 from app.templating import templates
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
+
+# Authentication middleware (v0.1.2).
+#
+# Ordering note: add_middleware wraps the app from the inside out, so the LAST
+# middleware added is the OUTERMOST (runs first). We need SessionMiddleware to
+# run before AuthMiddleware so that request.session is populated when the auth
+# check reads it — hence AuthMiddleware is added first, SessionMiddleware last.
+app.add_middleware(AuthMiddleware)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    same_site="lax",  # basic CSRF mitigation: cookie not sent on cross-site POSTs
+    https_only=False,  # HTTPS not implemented in v0.1.2; revisit when it is
+)
 
 # Static assets (CSS / JS).
 app.mount(
@@ -39,6 +55,7 @@ def _on_startup() -> None:
 templates.env.globals["app_name"] = APP_NAME
 templates.env.globals["app_version"] = APP_VERSION
 
+app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(servers.router)
 app.include_router(backups.router)

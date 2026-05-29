@@ -55,6 +55,26 @@ class Server(Base):
     )
 
 
+class Admin(Base):
+    """A single administrator account (v0.1.2 single-admin auth).
+
+    Passwords are never stored in plaintext — only the bcrypt hash produced by
+    ``app.auth.hash_password`` lives here. Advanced multi-user / role
+    management is intentionally out of scope until a later version.
+    """
+
+    __tablename__ = "admins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(120), nullable=False, unique=True, index=True)
+    password_hash = Column(String(255), nullable=False)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class Backup(Base):
     __tablename__ = "backups"
 

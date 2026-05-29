@@ -2,15 +2,26 @@
 
 ## v0.2 — Production-readiness basics
 
-- **Authentication**: local user accounts + session login. No unauthenticated
-  access to any mutating endpoint.
+- **Authentication** ✅ (delivered in v0.1.2): single-admin session login. No
+  unauthenticated access to any mutating endpoint.
+- **RCON integration** ✅ (delivered in v0.2): graceful stop via `save-all` +
+  `stop` over RCON with a SIGTERM fallback; `save-all` before backups; an
+  allow-listed in-page console. See [`09_rcon.md`](09_rcon.md).
 - **HTTPS**: TLS support (self-signed for LAN, or reverse-proxy guidance).
-- **RCON integration**: graceful stop via `save-all` + `stop` over RCON instead
-  of raw `SIGTERM`; ability to send console commands.
+  *(still pending)*
 - **systemd integration**: optionally generate and manage per-server systemd
   units (with a clearly scoped, audited privilege boundary) so servers survive
-  host reboots and get proper supervision.
-- **CSRF protection** and basic audit logging.
+  host reboots and get proper supervision. *(still pending)*
+- **CSRF protection** and basic audit logging. *(still pending)*
+
+### Carried forward from v0.2 (not yet done)
+
+- HTTPS / TLS for the web UI.
+- Per-server systemd unit generation/management.
+- CSRF tokens and audit logging.
+- Multi-user accounts and roles.
+- An audited "advanced" RCON mode for free-form commands (the v0.2 allow-list is
+  the seam for this).
 
 ## v0.3 — Operations features
 

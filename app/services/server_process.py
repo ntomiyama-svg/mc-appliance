@@ -17,7 +17,11 @@ from typing import List, Optional
 import psutil
 from sqlalchemy.orm import Session
 
-from app.config import MANAGED_LOG_DIR, STOP_TIMEOUT_SECONDS
+from app.config import (
+    MANAGED_LOG_DIR,
+    RCON_STOP_TIMEOUT_SECONDS,
+    STOP_TIMEOUT_SECONDS,
+)
 from app.models import STATUS_RUNNING, STATUS_STOPPED, Server
 
 
@@ -108,11 +112,64 @@ def start_server(db: Session, server: Server) -> str:
 
 
 def stop_server(db: Session, server: Server) -> str:
-    """Gracefully stop the server with SIGTERM. No SIGKILL escalation in v0.1."""
+    """Stop the server, preferring a graceful RCON shutdown (v0.2).
+
+    Order of operations:
+
+    1. If RCON is enabled, issue ``save-all flush`` + ``stop`` over RCON and wait
+       up to ``RCON_STOP_TIMEOUT_SECONDS`` for the process to exit.
+    2. If RCON is disabled, cannot be reached, or the process does not exit in
+       time, fall back to the v0.1 SIGTERM path.
+
+    SIGKILL is still never sent automatically.
+    """
     if refresh_status(db, server) == STATUS_STOPPED:
         return "Server is not running."
 
     pid = server.pid
+
+    if server.rcon_enabled:
+        rcon_msg = _stop_via_rcon(db, server, pid)
+        if rcon_msg is not None:
+            return rcon_msg
+        # RCON unavailable or the process outlived the RCON wait: fall back.
+        fallback = _stop_via_sigterm(db, server, pid)
+        return f"RCON stop unavailable/incomplete; used SIGTERM. {fallback}"
+
+    return _stop_via_sigterm(db, server, pid)
+
+
+def _stop_via_rcon(db: Session, server: Server, pid: int) -> Optional[str]:
+    """Attempt a graceful RCON stop.
+
+    Returns a status message if the process exited within the RCON timeout, or
+    ``None`` to signal the caller to fall back to SIGTERM (RCON could not be used
+    or the process did not exit in time).
+    """
+    # Local import keeps the module import graph simple (rcon_service does not
+    # import server_process, so there is no real cycle, but this is tidy).
+    from app.services import rcon_service
+
+    result = rcon_service.stop_via_rcon(server)
+    server.rcon_last_status = (result["message"] or "")[:250]
+    db.commit()
+    if not result["ok"]:
+        return None  # Could not even issue the RCON stop — fall back.
+
+    deadline = time.time() + RCON_STOP_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        if not _process_is_minecraft(pid, server):
+            server.status = STATUS_STOPPED
+            server.pid = None
+            db.commit()
+            return "Server stopped via RCON (save-all + stop)."
+        time.sleep(0.5)
+
+    return None  # Stop issued but still alive — fall back to SIGTERM.
+
+
+def _stop_via_sigterm(db: Session, server: Server, pid: int) -> str:
+    """v0.1 fallback: send SIGTERM and wait. No SIGKILL escalation."""
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -130,13 +187,14 @@ def stop_server(db: Session, server: Server) -> str:
             server.status = STATUS_STOPPED
             server.pid = None
             db.commit()
-            return "Server stopped."
+            return "Server stopped (SIGTERM)."
         time.sleep(0.5)
 
-    # Still alive: report failure. Operator can stop manually; SIGKILL is v0.2+.
+    # Still alive: report failure. Operator can stop manually; SIGKILL is never
+    # performed automatically.
     return (
         f"Stop FAILED: PID {pid} did not exit within {STOP_TIMEOUT_SECONDS}s. "
-        "SIGKILL is not performed automatically in v0.1."
+        "SIGKILL is not performed automatically."
     )
 
 

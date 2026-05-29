@@ -214,3 +214,12 @@ textarea { resize: vertical; }
 .muted { color: var(--muted); }
 .right { text-align: right; }
 .mt { margin-top: 16px; }
+
+/* RCON */
+label.check { display: flex; align-items: center; gap: 8px; color: var(--text); margin-bottom: 0; }
+label.check input { width: auto; }
+.rcon-result { margin-top: 10px; white-space: pre-wrap; font-size: 13px; min-height: 1em; }
+.rcon-result.ok-box { color: #5ad37a; }
+.rcon-result.err-box { color: #ffd7d5; }
+.logbox.ok-box { border-color: #2ea043; }
+.logbox.err-box { border-color: var(--danger); }

@@ -25,7 +25,7 @@ from typing import Any, Dict, Optional
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 APP_NAME = "mc-appliance"
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.2.0"
 
 # Default location of the optional system config file.
 DEFAULT_CONFIG_PATH = "/etc/mc-appliance/config.yaml"
@@ -94,8 +94,19 @@ DEFAULT_MIN_MEMORY = "1G"
 DEFAULT_MAX_MEMORY = "4G"
 
 # How long (seconds) to wait for a graceful SIGTERM shutdown before reporting
-# the stop as failed. v0.1 deliberately does NOT escalate to SIGKILL.
+# the stop as failed. Neither v0.1 nor v0.2 escalate to SIGKILL automatically.
 STOP_TIMEOUT_SECONDS = 10
+
+# --- RCON (v0.2) ---------------------------------------------------------------
+# Defaults applied to a newly registered server's RCON connection settings.
+DEFAULT_RCON_HOST = "127.0.0.1"
+DEFAULT_RCON_PORT = 25575
+# Socket timeout (seconds) for a single RCON connect/command. Kept short so a
+# misconfigured or unreachable server fails fast in the UI.
+RCON_CONNECT_TIMEOUT_SECONDS = 5
+# How long (seconds) to wait for the process to actually exit after issuing an
+# RCON `stop` before falling back to the SIGTERM path.
+RCON_STOP_TIMEOUT_SECONDS = 30
 
 # Number of trailing lines of latest.log to show.
 LOG_TAIL_LINES = 200
@@ -107,7 +118,7 @@ for _d in (DATA_DIR, BACKUP_DIR, MANAGED_LOG_DIR):
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 APP_NAME = "mc-appliance"
-APP_VERSION = "0.1.2"
+APP_VERSION = "0.2.0"
 
 # Secret key used to sign session cookies (Starlette SessionMiddleware).
 #

@@ -52,6 +52,81 @@
   </div>
 </div>
 
+<h3 class="section-title">RCON</h3>
+<div class="detail-grid" id="rcon" data-server-id="{{ server.id }}">
+  <div class="card">
+    <h3 style="margin-top:0">RCON status</h3>
+    <table class="kv">
+      <tr><td>Enabled</td><td>
+        {% if server.rcon_enabled %}<span class="badge running">enabled</span>{% else %}<span class="badge stopped">disabled</span>{% endif %}
+      </td></tr>
+      <tr><td>Connect to</td><td>{{ server.rcon_host }}:{{ server.rcon_port }}</td></tr>
+      <tr><td>Password</td><td>{{ 'set' if rcon_password_set else '— not set' }}</td></tr>
+      <tr><td>Last status</td><td>{{ server.rcon_last_status or '—' }}</td></tr>
+    </table>
+    <div class="btn-row mt">
+      <button class="btn" type="button" id="rcon-test-btn">⇄ RCON Test</button>
+    </div>
+    <div id="rcon-test-result" class="rcon-result"></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">RCON settings</h3>
+    <form method="post" action="/servers/{{ server.id }}/rcon/settings" class="form-grid" style="gap:10px; max-width:none">
+      <label class="check"><input type="checkbox" name="rcon_enabled" value="true" {{ 'checked' if server.rcon_enabled else '' }}> enable-rcon</label>
+      <div>
+        <label>Connect host</label>
+        <input type="text" name="rcon_host" value="{{ server.rcon_host }}">
+      </div>
+      <div>
+        <label>rcon.port</label>
+        <input type="text" name="rcon_port" value="{{ server.rcon_port }}">
+      </div>
+      <div>
+        <label>rcon.password</label>
+        <input type="text" id="rcon-password" name="rcon_password" autocomplete="new-password"
+               placeholder="{{ 'leave blank to keep current password' if rcon_password_set else 'not set — generate or type one' }}">
+        <p class="hint">Never shown after saving. Leave blank to keep the current password.</p>
+      </div>
+      <div class="btn-row">
+        <button class="btn" type="button" id="rcon-genpw-btn">🎲 Generate</button>
+        <button class="btn primary" type="submit">Save RCON settings</button>
+      </div>
+      <p class="hint">⚠ After changing RCON settings you must <strong>restart the Minecraft server</strong> for them to take effect.</p>
+    </form>
+  </div>
+</div>
+
+<h3 class="section-title">RCON console <span class="muted" style="font-size:12px">(allow-list only)</span></h3>
+<div class="card" id="rcon-console" data-server-id="{{ server.id }}">
+  {% if not server.rcon_enabled %}
+  <p class="hint">RCON is disabled for this server. Enable it above, set a password, and restart the server before sending commands.</p>
+  {% endif %}
+  <div class="btn-row" style="flex-wrap:wrap; gap:6px">
+    <button class="btn" type="button" data-rcon-cmd="list">list</button>
+    <button class="btn" type="button" data-rcon-cmd="save-all flush">save-all</button>
+    <button class="btn" type="button" data-rcon-prompt="say" data-rcon-label="Message to broadcast:">say…</button>
+    <button class="btn" type="button" data-rcon-cmd="whitelist list">whitelist list</button>
+    <button class="btn" type="button" data-rcon-prompt="whitelist add" data-rcon-label="Player to whitelist:">whitelist add…</button>
+    <button class="btn" type="button" data-rcon-prompt="whitelist remove" data-rcon-label="Player to remove from whitelist:">whitelist remove…</button>
+    <button class="btn" type="button" data-rcon-prompt="op" data-rcon-label="Player to op:">op…</button>
+    <button class="btn" type="button" data-rcon-prompt="deop" data-rcon-label="Player to deop:">deop…</button>
+    <button class="btn" type="button" data-rcon-prompt="kick" data-rcon-label="Player to kick (optionally add a reason):">kick…</button>
+    <button class="btn stop" type="button" data-rcon-cmd="stop" data-rcon-confirm="Send RCON 'stop' to shut this server down?">stop</button>
+  </div>
+  <div class="form-grid mt" style="max-width:none">
+    <div>
+      <label>Send an allow-listed command</label>
+      <input type="text" id="rcon-cmd-input" placeholder="e.g.  say hello everyone   |   whitelist add Steve">
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" type="button" id="rcon-send-btn">Send</button>
+    </div>
+  </div>
+  <p class="hint">Allowed in v0.2: {{ allowed_commands | join(", ") }}. Arbitrary commands are intentionally disabled.</p>
+  <div class="logbox mt" id="rcon-output" style="max-height:240px">(no command run yet)</div>
+</div>
+
 <h3 class="section-title">Start command</h3>
 <div class="cmdbox">{{ start_command }}</div>
 

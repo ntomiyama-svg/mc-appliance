@@ -51,6 +51,109 @@ document.addEventListener("submit", (e) => {
   }
 });
 
+// ----- RCON console (server detail page) -----------------------------------
+
+function rconServerId() {
+  const el = document.getElementById("rcon-console") || document.getElementById("rcon");
+  return el ? el.dataset.serverId : null;
+}
+
+// Render an {ok, message, diagnosis, response} result into a target box.
+function rconShow(targetId, result) {
+  const box = document.getElementById(targetId);
+  if (!box) return;
+  let text = (result.ok ? "✓ " : "✗ ") + (result.message || "");
+  if (result.diagnosis) text += "\nHint: " + result.diagnosis;
+  if (result.response) text += "\n\n" + result.response;
+  box.textContent = text;
+  box.classList.remove("ok-box", "err-box");
+  box.classList.add(result.ok ? "ok-box" : "err-box");
+}
+
+// POST to an RCON endpoint and parse JSON. If the session has expired the
+// AuthMiddleware redirects to /login (HTML), which we detect and surface.
+function rconPost(path, params) {
+  const id = rconServerId();
+  const body = new URLSearchParams(params || {});
+  return fetch("/servers/" + id + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  }).then((r) => {
+    const ct = r.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      throw new Error("Not authenticated or unexpected response — try reloading the page.");
+    }
+    return r.json();
+  });
+}
+
+function initRcon() {
+  if (!document.getElementById("rcon-console") && !document.getElementById("rcon")) return;
+
+  const testBtn = document.getElementById("rcon-test-btn");
+  if (testBtn) {
+    testBtn.addEventListener("click", () => {
+      rconShow("rcon-test-result", { ok: true, message: "Testing…" });
+      rconPost("/rcon/test", {})
+        .then((res) => rconShow("rcon-test-result", res))
+        .catch((e) => rconShow("rcon-test-result", { ok: false, message: e.message }));
+    });
+  }
+
+  const genBtn = document.getElementById("rcon-genpw-btn");
+  if (genBtn) {
+    genBtn.addEventListener("click", () => {
+      rconPost("/rcon/generate-password", {})
+        .then((res) => {
+          const inp = document.getElementById("rcon-password");
+          if (res.ok && inp) {
+            inp.value = res.password;
+            inp.focus();
+          }
+        })
+        .catch((e) => alert("Could not generate password: " + e.message));
+    });
+  }
+
+  function sendCommand(cmd) {
+    if (!cmd) return;
+    rconShow("rcon-output", { ok: true, message: "Running: " + cmd });
+    rconPost("/rcon/command", { command: cmd })
+      .then((res) => rconShow("rcon-output", res))
+      .catch((e) => rconShow("rcon-output", { ok: false, message: e.message }));
+  }
+
+  const sendBtn = document.getElementById("rcon-send-btn");
+  const cmdInput = document.getElementById("rcon-cmd-input");
+  if (sendBtn) {
+    sendBtn.addEventListener("click", () => sendCommand(cmdInput ? cmdInput.value.trim() : ""));
+  }
+  if (cmdInput) {
+    cmdInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        sendCommand(cmdInput.value.trim());
+      }
+    });
+  }
+
+  document.querySelectorAll("[data-rcon-cmd], [data-rcon-prompt]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.rconConfirm && !window.confirm(btn.dataset.rconConfirm)) return;
+      if (btn.dataset.rconPrompt) {
+        const answer = window.prompt(btn.dataset.rconLabel || "Argument:");
+        if (answer === null) return;
+        const trimmed = answer.trim();
+        if (!trimmed) return;
+        sendCommand(btn.dataset.rconPrompt + " " + trimmed);
+      } else {
+        sendCommand(btn.dataset.rconCmd);
+      }
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   refreshMetrics();
   setInterval(refreshMetrics, 5000);
@@ -60,4 +163,6 @@ document.addEventListener("DOMContentLoaded", () => {
     box.scrollTop = box.scrollHeight;
     setInterval(refreshLog, 7000);
   }
+
+  initRcon();
 });

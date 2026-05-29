@@ -176,6 +176,34 @@ admins in v0.1.2, so create the account you intend to use.
 3. The signed-in username and a **Logout** link appear in the top bar. Logging
    out clears the session and returns you to the login screen.
 
+## RCON (v0.2)
+
+Since **v0.2** mc-appliance can talk to a running server over **RCON** to send a
+small allow-listed set of console commands, flush the world (`save-all`), and
+stop the server gracefully. Full details are in
+[`docs/09_rcon.md`](docs/09_rcon.md).
+
+### Enabling RCON
+
+1. Open **Servers → (a server) → RCON → RCON settings**.
+2. Tick **enable-rcon**, set `rcon.port` (default `25575`), and either type or
+   **Generate** an `rcon.password`.
+3. Click **Save RCON settings** — this writes `enable-rcon` / `rcon.port` /
+   `rcon.password` into the server's `server.properties` (a `.bak` is created
+   first) and mirrors the connection settings into the app database.
+4. **Restart the Minecraft server** — RCON settings are only read at startup.
+5. Use **RCON Test** to confirm the connection, then the quick-command buttons
+   or the console input (allow-list only).
+
+> ⚠️ **Do not expose the RCON port (e.g. 25575) to the public internet.** RCON
+> traffic and its password are unencrypted. Keep the port on loopback
+> (`127.0.0.1`) or a trusted LAN and firewall it off from the outside. The
+> password is never displayed after saving and never written to logs.
+
+When RCON is enabled, **Stop** uses RCON `save-all` + `stop` first and only
+falls back to `SIGTERM` if RCON is unavailable or fails; backups run
+`save-all flush` beforehand so the snapshot is consistent.
+
 ## Registering an existing Minecraft server
 
 1. Click **Servers → Register Server**.
@@ -208,10 +236,13 @@ never copies or moves your existing data during registration.
 ## Notes / cautions
 
 - The app runs Minecraft servers as **its own user**, via `subprocess`.
-- Stopping a server uses `SIGTERM` only; if it does not exit within 10 seconds
-  the stop is reported as **failed** (no automatic `SIGKILL` in v0.1).
+- Stopping a server prefers a graceful **RCON** `save-all` + `stop` when RCON is
+  enabled, and **falls back to `SIGTERM`** otherwise (or if RCON fails). There
+  is still **no automatic `SIGKILL`**. See [RCON](#rcon-v02).
 - Editing is restricted to the `server.properties` of a registered server.
-- There is **no delete** function and **no arbitrary command execution**.
+- The RCON console only allows a fixed set of commands; there is **no arbitrary
+  command execution**.
+- There is **no delete** function.
 
 ## What v0.1 can do
 
@@ -232,9 +263,9 @@ never copies or moves your existing data during registration.
 - No **per-server** systemd integration (the app *itself* can run as a systemd
   service — see "Installing as a system service" — but Minecraft servers are
   still managed as subprocesses)
-- No RCON (graceful in-game stop / commands)
 - No sudo / privileged operations
-- No `SIGKILL` / force-kill
+- No `SIGKILL` / force-kill (RCON `stop` / `SIGTERM` only)
+- No arbitrary RCON commands (allow-list only — see [RCON](#rcon-v02))
 - No backup restore
 - No server deletion or file deletion
 - No Ubuntu/Debian-specific tooling
@@ -244,7 +275,8 @@ never copies or moves your existing data during registration.
 See [`docs/06_future_plan.md`](docs/06_future_plan.md). Highlights:
 
 - v0.1.2: administrator login (single admin, cookie sessions) ✅
-- v0.2: HTTPS, CSRF tokens, multi-user/roles, RCON-based safe stop, systemd unit management
+- v0.2: RCON-based safe stop + allow-listed console + `save-all` before backups ✅
+- v0.2+ (pending): HTTPS, CSRF tokens, multi-user/roles, systemd unit management
 - v0.3: backup restore, scheduling, multi-user roles
 - Later: Rocky Linux appliance image, Ubuntu/Debian support
 
@@ -257,3 +289,4 @@ See [`docs/06_future_plan.md`](docs/06_future_plan.md). Highlights:
 - [`docs/05_directory_layout.md`](docs/05_directory_layout.md)
 - [`docs/06_future_plan.md`](docs/06_future_plan.md)
 - [`docs/08_authentication.md`](docs/08_authentication.md)
+- [`docs/09_rcon.md`](docs/09_rcon.md)

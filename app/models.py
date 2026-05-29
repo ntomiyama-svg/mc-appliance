@@ -42,6 +42,15 @@ class Server(Base):
     has_mods = Column(Boolean, nullable=False, default=False)
     has_plugins = Column(Boolean, nullable=False, default=False)
 
+    # RCON (v0.2). These mirror enable-rcon / rcon.port / rcon.password in the
+    # server's server.properties so the app knows how to connect. The password
+    # is never rendered in plaintext by the UI and never written to logs.
+    rcon_enabled = Column(Boolean, nullable=False, default=False)
+    rcon_host = Column(String(255), nullable=False, default="127.0.0.1")
+    rcon_port = Column(Integer, nullable=False, default=25575)
+    rcon_password = Column(String(255), nullable=True)
+    rcon_last_status = Column(String(255), nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow

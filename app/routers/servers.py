@@ -5,15 +5,22 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.config import DEFAULT_JAVA_PATH, DEFAULT_MAX_MEMORY, DEFAULT_MIN_MEMORY
+from app.config import (
+    DEFAULT_JAVA_PATH,
+    DEFAULT_MAX_MEMORY,
+    DEFAULT_MIN_MEMORY,
+    DEFAULT_RCON_HOST,
+    DEFAULT_RCON_PORT,
+)
 from app.database import get_db
 from app.models import Server
 from app.services import (
     log_service,
     properties_service,
+    rcon_service,
     server_detector,
     server_process,
 )
@@ -160,6 +167,10 @@ def server_detail(server_id: int, request: Request, db: Session = Depends(get_db
             "detection": detection,
             "log_text": log_text,
             "start_command": start_command,
+            # RCON context. Never expose the password itself — only whether one
+            # is set — and the list of commands the v0.2 console allows.
+            "rcon_password_set": bool(server.rcon_password),
+            "allowed_commands": rcon_service.ALLOWED_COMMANDS,
         },
     )
 
@@ -246,3 +257,99 @@ def action_restart(server_id: int, db: Session = Depends(get_db)):
     except FileNotFoundError as exc:
         msg = f"Restart failed: {exc}"
     return _action_redirect(server_id, msg)
+
+
+# ----- RCON (v0.2) ------------------------------------------------------------
+#
+# These routes are admin-only via the global AuthMiddleware (no extra dependency
+# is needed). The test/command/generate-password endpoints return JSON for the
+# in-page console; the settings endpoint is a regular form POST + redirect.
+
+
+def _merge_properties(server: Server, updates: dict) -> None:
+    """Apply ``updates`` to server.properties, preserving everything else.
+
+    A ``.bak`` copy is made by ``properties_service.write_properties``; if the
+    file does not exist yet it is created with just the given keys.
+    """
+    existing, _exists = properties_service.read_properties(server)
+    merged = dict(existing)
+    merged.update(updates)
+    properties_service.write_properties(server, merged)
+
+
+@router.post("/{server_id}/rcon/settings")
+async def rcon_settings(server_id: int, request: Request, db: Session = Depends(get_db)):
+    server = _get_server_or_404(db, server_id)
+    form = await request.form()
+
+    enabled = (form.get("rcon_enabled") or "").lower() in ("on", "true", "1", "yes")
+    host = (form.get("rcon_host") or DEFAULT_RCON_HOST).strip() or DEFAULT_RCON_HOST
+    port_raw = (form.get("rcon_port") or str(DEFAULT_RCON_PORT)).strip()
+    # Blank password means "keep the current one" — we never round-trip the
+    # stored password through the form.
+    password = (form.get("rcon_password") or "").strip()
+
+    try:
+        port = int(port_raw)
+        if not 1 <= port <= 65535:
+            raise ValueError
+    except ValueError:
+        return _action_redirect(server_id, "RCON port must be an integer between 1 and 65535.")
+
+    # Mirror the connection settings into the DB.
+    server.rcon_enabled = enabled
+    server.rcon_host = host
+    server.rcon_port = port
+    if password:
+        server.rcon_password = password
+
+    # Write the matching keys into server.properties (.bak created on the way).
+    prop_updates = {
+        "enable-rcon": "true" if enabled else "false",
+        "rcon.port": str(port),
+    }
+    if password:
+        prop_updates["rcon.password"] = password
+
+    note = ""
+    try:
+        _merge_properties(server, prop_updates)
+    except (ValueError, OSError) as exc:
+        note = f" (warning: could not update server.properties: {exc})"
+
+    db.commit()
+    return _action_redirect(
+        server_id,
+        "RCON settings saved." + note
+        + " Restart the Minecraft server for the changes to take effect.",
+    )
+
+
+@router.post("/{server_id}/rcon/generate-password")
+def rcon_generate_password(server_id: int, db: Session = Depends(get_db)):
+    """Return a fresh random password for the settings form to fill in.
+
+    The password is NOT persisted here — the admin reviews it and saves it via
+    the settings form. This keeps it out of redirect URLs and server logs.
+    """
+    _get_server_or_404(db, server_id)
+    return JSONResponse({"ok": True, "password": rcon_service.generate_password()})
+
+
+@router.post("/{server_id}/rcon/test")
+def rcon_test(server_id: int, db: Session = Depends(get_db)):
+    server = _get_server_or_404(db, server_id)
+    result = rcon_service.test_connection(server)
+    server.rcon_last_status = (result["message"] or "")[:250]
+    db.commit()
+    return JSONResponse(result)
+
+
+@router.post("/{server_id}/rcon/command")
+def rcon_command(server_id: int, command: str = Form(...), db: Session = Depends(get_db)):
+    server = _get_server_or_404(db, server_id)
+    result = rcon_service.run_command(server, command)
+    server.rcon_last_status = (result["message"] or "")[:250]
+    db.commit()
+    return JSONResponse(result)

@@ -18,14 +18,18 @@ These are intentional constraints. Do **not** add features that violate them
 without an explicit version bump and discussion:
 
 - The web app must **never run as root** (startup aborts if euid == 0).
-- **No sudo**, **no systemctl**, **no Docker/containers** in v0.1.
-- **No arbitrary command execution** exposed to users.
+- **No sudo**, **no systemctl**, **no Docker/containers**.
+- **No arbitrary command execution** exposed to users. The v0.2 RCON console is
+  an **allow-list only** (see `services/rcon_service.ALLOWED_COMMANDS`); do not
+  add a free-form command field without an explicit version bump + discussion.
 - **No file deletion** and **no server deletion**.
 - Only the `server.properties` of a **registered** server may be edited.
 - All filesystem access must stay **inside the registered `server_path`**
   (guard against path traversal — see `log_service`, `properties_service`,
   `backup_service`).
-- Stopping uses **SIGTERM only**; no automatic SIGKILL.
+- Stopping (v0.2) prefers a graceful **RCON** `save-all` + `stop`, and **falls
+  back to SIGTERM**; **no automatic SIGKILL**. RCON features are admin-only and
+  the RCON password is never logged or shown in plaintext.
 
 ## Architecture map
 
@@ -39,7 +43,7 @@ app/
   templating.py      shared Jinja2Templates + filters/globals
   routers/           dashboard, servers (+properties), backups, system
   services/          server_detector, server_process, properties_service,
-                     log_service, backup_service, system_metrics
+                     log_service, backup_service, system_metrics, rcon_service
   templates/         Jinja2 pages (base.html is the layout)
   static/            css/style.css, js/main.js
 data/                SQLite DB + managed server stdout logs (gitignored)
@@ -48,13 +52,17 @@ docs/                design docs
 scripts/             dev_run.sh, install_rocky9.sh
 ```
 
-## Process model (v0.1)
+## Process model (v0.1 launch, v0.2 stop)
 
 Servers are launched with `subprocess.Popen(..., start_new_session=True)` from
 `services/server_process.py`. The PID is stored on the `Server` row.
 `refresh_status()` reconciles DB status with reality (using psutil and a cwd
-check to avoid acting on a recycled PID). This is replaced by systemd/RCON in
-v0.2+.
+check to avoid acting on a recycled PID). Launch is still subprocess-based
+(per-server systemd is deferred). **Stop** is v0.2 RCON-first with a SIGTERM
+fallback (`stop_server` → `_stop_via_rcon` / `_stop_via_sigterm`).
+
+RCON uses the `rcon` PyPI package (not `mcrcon`, whose SIGALRM-based timeout
+breaks in FastAPI's worker threadpool). See `docs/09_rcon.md`.
 
 ## Running locally
 

@@ -37,31 +37,63 @@ from app.config import (
 )
 from app.models import (
     STATUS_CRASHED,
+    STATUS_FAILED_TO_START,
     STATUS_RUNNING,
     STATUS_STARTING,
     STATUS_STOPPED,
+    STATUS_STOPPING,
     STATUS_UNKNOWN,
     Server,
 )
 from app.services import log_service
 
-# Substrings that mark a server having *finished* starting up. Any one of these
-# in the recent tail is treated as "the server reached a usable state".
+# Substrings that mark a server having *finished* starting up. The canonical
+# signal is the "Done (12.345s)!" line; we keep the help banner as a backup.
+# (We deliberately do NOT treat generic "Server thread/INFO" lines as
+# completion — they appear throughout a run and would mask the starting state.)
 COMPLETION_MARKERS: Tuple[str, ...] = (
     "Done (",
-    "For help, type",
-    "Server thread/INFO",
+    'For help, type "help"',
 )
 
-# Substrings that look like a fault. Matched case-sensitively against the tail;
-# these are the canonical forms Minecraft / the JVM actually emit.
-ERROR_MARKERS: Tuple[str, ...] = (
+# Parses the startup duration out of the canonical line: ``Done (12.345s)! ...``
+_DONE_RE = re.compile(r"Done \(([\d.]+)s\)")
+
+# Markers that the server is in the middle of a *graceful shutdown*. Kept narrow
+# (the explicit "Stopping …" lines) so routine autosave chatter like
+# "Saving chunks" does not get misread as stopping while the server is running.
+STOP_MARKERS: Tuple[str, ...] = (
+    "Stopping the server",
+    "Stopping server",
+)
+
+# Specific, high-signal fault lines mapped to a short operator-facing summary.
+# Order matters: the first match wins as the "last error summary". These are the
+# canonical forms Minecraft / the JVM actually emit. When one of these appears
+# without a startup-complete line, the server is classified failed_to_start.
+SPECIFIC_ERROR_MARKERS: Tuple[Tuple[str, str], ...] = (
+    ("UnsupportedClassVersionError",
+     "Java is too old for this server (UnsupportedClassVersionError) — select a newer Java runtime."),
+    ("You need to agree to the EULA",
+     "EULA not accepted — set eula=true (Server jar & EULA)."),
+    ("Failed to load eula.txt",
+     "Could not read eula.txt."),
+    ("FAILED TO BIND TO PORT",
+     "Could not bind the server port — it may already be in use."),
+    ("Address already in use",
+     "The server port is already in use (Address already in use)."),
+    ("OutOfMemoryError",
+     "The server ran out of memory — increase -Xmx (max memory)."),
+    ("Permission denied",
+     "Permission denied accessing a file in the server directory."),
+)
+
+# Broad fallback fault markers (case-sensitive) used only to flag a generic
+# error when none of the specific markers above matched.
+GENERIC_ERROR_MARKERS: Tuple[str, ...] = (
     "Exception",
     "ERROR",
-    "Failed",
     "Crash",
-    "Could not",
-    "Unable to",
 )
 
 # Anything outside this set in a server name is replaced before it becomes a
@@ -105,6 +137,22 @@ def managed_log_path(server: Server) -> Path:
     candidate = (base / f"{sanitize_server_name(server.name)}.log").resolve()
     if candidate.parent != base:
         raise ValueError("Managed log path escapes MANAGED_LOG_DIR.")
+    return candidate
+
+
+def stdin_fifo_path(server: Server) -> Path:
+    """Path of the stdin FIFO used to send console input to ``server``.
+
+    Lives next to the managed log under MANAGED_LOG_DIR, with the same sanitised
+    basename, so it inherits the identical path-traversal guarantee. We launch
+    the server with this FIFO as its stdin (see ``server_process.start_server``)
+    so a graceful ``stop`` can be written to the running console even though the
+    process is detached and our original ``Popen`` handle is long gone.
+    """
+    base = Path(MANAGED_LOG_DIR).resolve()
+    candidate = (base / f"{sanitize_server_name(server.name)}.stdin").resolve()
+    if candidate.parent != base:
+        raise ValueError("Managed stdin FIFO path escapes MANAGED_LOG_DIR.")
     return candidate
 
 
@@ -205,11 +253,68 @@ def read_managed_log(server: Server, lines: int) -> Dict:
     )
 
 
-def _scan_markers(text: str) -> Tuple[bool, bool]:
-    """Return ``(has_completion, has_error)`` for a block of log text."""
+def _scan_markers(text: str) -> Dict:
+    """Scan a block of log text for the state-driving markers.
+
+    Returns a dict with: has_completion, has_stop, specific_error (summary or
+    None), has_generic_error, startup_duration (float seconds, or None).
+    """
     has_completion = any(marker in text for marker in COMPLETION_MARKERS)
-    has_error = any(marker in text for marker in ERROR_MARKERS)
-    return has_completion, has_error
+    has_stop = any(marker in text for marker in STOP_MARKERS)
+
+    specific_error: Optional[str] = None
+    for needle, summary in SPECIFIC_ERROR_MARKERS:
+        if needle in text:
+            specific_error = summary
+            break
+    has_generic_error = specific_error is not None or any(
+        marker in text for marker in GENERIC_ERROR_MARKERS
+    )
+
+    startup_duration: Optional[float] = None
+    matches = _DONE_RE.findall(text)
+    if matches:
+        try:
+            startup_duration = float(matches[-1])
+        except ValueError:
+            startup_duration = None
+
+    return {
+        "has_completion": has_completion,
+        "has_stop": has_stop,
+        "specific_error": specific_error,
+        "has_generic_error": has_generic_error,
+        "startup_duration": startup_duration,
+    }
+
+
+def _server_port(server: Server) -> Optional[int]:
+    """Best-effort: the server's listen port from server.properties (or None)."""
+    try:
+        from app.services import properties_service
+
+        props, exists = properties_service.read_properties(server)
+        if not exists:
+            return None
+        raw = props.get("server-port")
+        return int(raw) if raw not in (None, "") else None
+    except (ValueError, OSError):
+        return None
+
+
+def _port_listening(port: Optional[int]) -> Optional[bool]:
+    """Whether something is LISTENing on ``port`` (None if it can't be checked)."""
+    if not port:
+        return None
+    try:
+        import psutil
+
+        for conn in psutil.net_connections(kind="inet"):
+            if conn.status == psutil.CONN_LISTEN and conn.laddr and conn.laddr.port == port:
+                return True
+        return False
+    except Exception:  # pragma: no cover - psutil perms / platform differences
+        return None
 
 
 def evaluate(server: Server) -> Dict:
@@ -244,14 +349,17 @@ def evaluate(server: Server) -> Dict:
         _tail_lines(latest_path, CONSOLE_STATE_SCAN_LINES)
         + _tail_lines(managed_path, CONSOLE_STATE_SCAN_LINES)
     )
-    has_completion, has_error = _scan_markers(scan_text)
+    markers = _scan_markers(scan_text)
+
+    port = _server_port(server)
+    port_listening = _port_listening(port)
 
     detected_state, detected_reason = _classify(
         db_status=db_status,
         process_exists=process_exists,
         actual_status=actual_status,
-        has_completion=has_completion,
-        has_error=has_error,
+        markers=markers,
+        port_listening=port_listening,
     )
 
     return {
@@ -265,23 +373,54 @@ def evaluate(server: Server) -> Dict:
         "managed_log_mtime": managed_mtime,
         "detected_state": detected_state,
         "detected_reason": detected_reason,
+        # Richer signals (v0.5).
+        "server_port": port,
+        "port_listening": port_listening,
+        "last_error_summary": markers["specific_error"],
+        "startup_duration_seconds": markers["startup_duration"],
+        # Persisted bookkeeping echoed for the UI (set by server_process).
+        "last_stop_method": server.last_stop_method,
+        "last_started_at": _fmt_dt(server.last_started_at),
+        "last_stopped_at": _fmt_dt(server.last_stopped_at),
+        "last_start_error": server.last_start_error,
+        "last_stop_error": server.last_stop_error,
     }
+
+
+def _fmt_dt(value) -> Optional[str]:
+    """Format a datetime for JSON, or None."""
+    try:
+        return value.strftime("%Y-%m-%d %H:%M:%S") if value else None
+    except AttributeError:
+        return None
 
 
 def _classify(
     db_status: str,
     process_exists: bool,
     actual_status: str,
-    has_completion: bool,
-    has_error: bool,
+    markers: Dict,
+    port_listening: Optional[bool],
 ) -> Tuple[str, str]:
     """Pure state machine for the detected state (see docs/14_server_console)."""
     if actual_status == STATUS_UNKNOWN:
         return STATUS_UNKNOWN, "Could not determine the process state."
 
+    has_completion = markers["has_completion"]
+    has_stop = markers["has_stop"]
+    specific_error = markers["specific_error"]
+    has_error = markers["has_generic_error"]
+
     if not process_exists:
-        # No live process. If the DB still thinks it should be up, that's an
-        # unexpected exit; if recent logs carry faults, call it crashed.
+        # No live process.
+        if specific_error and not has_completion:
+            return STATUS_FAILED_TO_START, f"Server failed to start: {specific_error}"
+        if has_error and not has_completion:
+            return (
+                STATUS_FAILED_TO_START,
+                "No live process and error lines appear before any startup-complete "
+                "marker (startup likely failed).",
+            )
         if db_status in (STATUS_RUNNING, STATUS_STARTING):
             return (
                 STATUS_CRASHED,
@@ -296,11 +435,23 @@ def _classify(
         return STATUS_STOPPED, "No PID, or the process is not running."
 
     # Process is alive.
+    if has_stop and not has_completion:
+        return STATUS_STOPPING, "Process is alive and a 'Stopping …' line was found."
+    if has_stop:
+        # Completion seen earlier AND a stop line now → it ran and is shutting down.
+        return STATUS_STOPPING, "Process is alive and shutting down ('Stopping …')."
     if has_completion:
+        port_note = ""
+        if port_listening is True:
+            port_note = " The server port is listening."
+        elif port_listening is False:
+            port_note = " (Startup complete but the server port is not yet listening.)"
         return (
             STATUS_RUNNING,
-            "Process is alive and a startup-complete line was found in the logs.",
+            "Process is alive and a startup-complete line was found." + port_note,
         )
+    if specific_error:
+        return STATUS_FAILED_TO_START, f"Startup error before completion: {specific_error}"
     if has_error:
         return (
             STATUS_CRASHED,

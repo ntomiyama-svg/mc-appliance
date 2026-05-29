@@ -223,8 +223,13 @@ SCHEDULER_TICK_SECONDS = 60
 DEFAULT_RETENTION_COUNT = 7
 
 # How long (seconds) to wait for a graceful SIGTERM shutdown before reporting
-# the stop as failed. Neither v0.1 nor v0.2 escalate to SIGKILL automatically.
+# the stop as failed. A normal stop never escalates to SIGKILL automatically —
+# that is only available through the explicit, confirmed Kill button (v0.5).
 STOP_TIMEOUT_SECONDS = 10
+# How long (seconds) to wait for the server to exit after writing "stop" to its
+# stdin console (the FIFO path) before falling back to SIGTERM. A clean world
+# save on stop can take a little while, so this is more generous than SIGTERM.
+STDIN_STOP_TIMEOUT_SECONDS = 30
 
 # --- RCON (v0.2) ---------------------------------------------------------------
 # Defaults applied to a newly registered server's RCON connection settings.

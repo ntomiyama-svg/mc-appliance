@@ -31,6 +31,15 @@ _ADDED_COLUMNS = {
         ("rcon_port", "INTEGER NOT NULL DEFAULT 25575"),
         ("rcon_password", "VARCHAR(255)"),
         ("rcon_last_status", "VARCHAR(255)"),
+        # v0.5 server-runtime-controls bookkeeping (all nullable — no default
+        # needed, an old row simply has no recorded last start/stop yet).
+        ("last_started_at", "DATETIME"),
+        ("last_stopped_at", "DATETIME"),
+        ("last_stop_method", "VARCHAR(32)"),
+        ("last_stop_error", "VARCHAR(255)"),
+        ("last_start_error", "VARCHAR(255)"),
+        ("last_runtime_status", "VARCHAR(32)"),
+        ("last_startup_duration_seconds", "INTEGER"),
     ],
 }
 

@@ -26,7 +26,9 @@ STATUS_UNKNOWN = "unknown"
 # ``status`` column, which keeps its v0.1 running/stopped semantics so the
 # existing start/stop/refresh logic and templates are unaffected.
 STATUS_STARTING = "starting"
+STATUS_STOPPING = "stopping"
 STATUS_CRASHED = "crashed"
+STATUS_FAILED_TO_START = "failed_to_start"
 
 
 class Server(Base):
@@ -57,6 +59,22 @@ class Server(Base):
     rcon_port = Column(Integer, nullable=False, default=25575)
     rcon_password = Column(String(255), nullable=True)
     rcon_last_status = Column(String(255), nullable=True)
+
+    # Runtime-control bookkeeping (v0.5 "server runtime controls"). These record
+    # the *outcome* of the most recent start/stop so the UI can show last start /
+    # stop times, which stop method actually worked, the startup duration parsed
+    # from the "Done (...)" line, and a short last-error summary. None of these
+    # ever hold a secret — the RCON password is never written here.
+    last_started_at = Column(DateTime, nullable=True)
+    last_stopped_at = Column(DateTime, nullable=True)
+    # "rcon" / "stdin" / "sigterm" / "sigkill" / "failed" / "already-stopped".
+    last_stop_method = Column(String(32), nullable=True)
+    last_stop_error = Column(String(255), nullable=True)
+    last_start_error = Column(String(255), nullable=True)
+    # Last detected console state (stopped/starting/running/stopping/crashed/
+    # failed_to_start/unknown) — persisted so it survives without live polling.
+    last_runtime_status = Column(String(32), nullable=True)
+    last_startup_duration_seconds = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(

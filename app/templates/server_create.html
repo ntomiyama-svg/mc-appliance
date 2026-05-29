@@ -53,6 +53,31 @@
       </div>
 
       <div style="grid-column:1 / -1">
+        <label for="java_path">Java runtime</label>
+        {% if java_runtimes %}
+        <select id="java_path" name="java_path">
+          {% for rt in java_runtimes %}
+          <option value="{{ rt.path }}" {{ 'selected' if rt.path == java_selected_path else '' }}>
+            {% if rt.major %}Java {{ rt.major }}{% else %}Java ?{% endif %} — {{ rt.path }}
+            {{ '(recommended)' if rt.major == java_recommended_major else '' }}
+          </option>
+          {% endfor %}
+        </select>
+        <div class="hint">
+          Recommended for this server: <strong>Java {{ java_recommended_major }}</strong>
+          {% if java_recommended_installed %}(installed and pre-selected).
+          {% else %}— <span style="color:var(--danger)">not installed</span>;
+            <a href="/system/java">install it from the Java Runtime Manager ↗</a>.{% endif %}
+          Only this server's <code>java_path</code> is set; the system default is untouched.
+        </div>
+        {% else %}
+        <input type="hidden" name="java_path" value="">
+        <div class="hint" style="color:var(--danger)">No Java runtimes detected.
+          <a href="/system/java">Open the Java Runtime Manager ↗</a> to install one.</div>
+        {% endif %}
+      </div>
+
+      <div style="grid-column:1 / -1">
         <label for="motd">MOTD</label>
         <input type="text" id="motd" name="motd" value="{{ form.motd }}">
       </div>

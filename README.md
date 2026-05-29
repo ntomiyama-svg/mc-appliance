@@ -228,8 +228,9 @@ stop the server gracefully. Full details are in
 > (`127.0.0.1`) or a trusted LAN and firewall it off from the outside. The
 > password is never displayed after saving and never written to logs.
 
-When RCON is enabled, **Stop** uses RCON `save-all` + `stop` first and only
-falls back to `SIGTERM` if RCON is unavailable or fails; backups run
+When RCON is enabled, **Stop** uses RCON `save-all` + `stop` first; if RCON is
+unavailable it tries an stdin `stop`, then `SIGTERM` (see
+[Server runtime controls](#server-runtime-controls-v05)). Backups run
 `save-all flush` beforehand so the snapshot is consistent.
 
 ## Server console (v0.5)
@@ -242,8 +243,11 @@ browser — whether the server is *really* running. Full details:
 It shows:
 
 - **Live status** — a detected state (`stopped` / `starting` / `running` /
-  `crashed` / `unknown`) derived from the real process *and* the logs, plus the
-  PID, whether the process actually exists, and each log's last-modified time.
+  `stopping` / `crashed` / `failed_to_start` / `unknown`) derived from the real
+  process, the server **port-listen** state, *and* the logs, plus the PID,
+  whether the process actually exists, the last stop method, last start/stop
+  times, last error summary, startup duration, and each log's last-modified
+  time. See [Server runtime controls](#server-runtime-controls-v05).
 - **Two logs, switchable:**
   - **Minecraft `latest.log`** — the server's own log
     (`<server_path>/logs/latest.log`).
@@ -266,6 +270,45 @@ running` with a PID and `process_exists = yes`, and (if RCON is on) run `list`.
 > — every endpoint requires login, and the RCON password is never logged or
 > shown. The persisted server `status` is unchanged; the starting/crashed
 > verdict is a separate, detection-only signal.
+
+## Server runtime controls (v0.5)
+
+v0.5 adds finer control over how each server runs and stops. Full details:
+[`docs/17_server_runtime_controls.md`](docs/17_server_runtime_controls.md).
+
+- **Per-server Java runtime** — pick the Java a server uses from the host's
+  detected runtimes (Server detail → **Java Runtime**), with a recommended /
+  required Java and a mismatch warning. A **Use Java N for this server** button
+  appears when the recommended runtime is installed, and **Create Server**
+  pre-selects it. Only the per-server `java_path` changes; the system-wide
+  `/usr/bin/java` is left untouched, and only a *detected* runtime is accepted.
+
+- **Safe Stop** — Stop tries the gentlest method that can reach the server, in
+  order: **RCON** `save-all`+`stop` → write `stop` to the server console over
+  **stdin** → **SIGTERM**. `SIGKILL` is never sent automatically. The method
+  that worked is shown ("Stopped by RCON / stdin command / SIGTERM" or "Failed
+  to stop") and recorded in the managed log. The stdin path works for servers
+  launched by v0.5+ (they get a console stdin FIFO); older ones fall back to
+  SIGTERM. A separate, confirmation-guarded **✕ Kill** button is the only path
+  that sends `SIGKILL`, and it does not save the world.
+
+- **RCON password** — **Generate & enable RCON** creates a strong random
+  password, ticks `enable-rcon` and sets `rcon.port=25575`; the field is masked
+  with a **Show/Hide** toggle, overwriting an existing password is confirmed,
+  and **Save** writes it to `server.properties` + the database. The password is
+  never logged and only shown once for review. A **restart-required** reminder
+  is displayed.
+
+- **Restart** — does a **safe stop → confirm stopped → start**; it will not
+  start if the stop did not complete, and records `last_start_error` on failure.
+
+- **More accurate status** — the Console distinguishes `stopped` / `starting` /
+  `running` / `stopping` / `crashed` / `failed_to_start` / `unknown` using the
+  process, the server **port-listen** state, and specific log markers
+  (`Done (…)` startup duration, `Stopping …`, `UnsupportedClassVersionError`,
+  EULA error, `Address already in use`, `OutOfMemoryError`, `Permission
+  denied`). It also shows last start/stop times, last stop method, last error
+  summary and startup duration.
 
 ## Java Runtime Manager / Java installer (v0.6)
 
@@ -404,8 +447,9 @@ never copies or moves your existing data during registration.
 
 - The app runs Minecraft servers as **its own user**, via `subprocess`.
 - Stopping a server prefers a graceful **RCON** `save-all` + `stop` when RCON is
-  enabled, and **falls back to `SIGTERM`** otherwise (or if RCON fails). There
-  is still **no automatic `SIGKILL`**. See [RCON](#rcon-v02).
+  enabled, then an **stdin `stop`**, then **`SIGTERM`**. There is still **no
+  automatic `SIGKILL`** — force-kill is only the explicit, confirmed Kill
+  button. See [Server runtime controls](#server-runtime-controls-v05).
 - Editing is restricted to the `server.properties` of a registered server.
 - The RCON console only allows a fixed set of commands; there is **no arbitrary
   command execution**.
@@ -431,7 +475,8 @@ never copies or moves your existing data during registration.
   service — see "Installing as a system service" — but Minecraft servers are
   still managed as subprocesses)
 - No sudo / privileged operations
-- No `SIGKILL` / force-kill (RCON `stop` / `SIGTERM` only)
+- No *automatic* `SIGKILL` — a normal Stop escalates only to `SIGTERM`;
+  force-kill is the explicit, confirmed **Kill** button (v0.5)
 - No arbitrary RCON commands (allow-list only — see [RCON](#rcon-v02))
 - No backup restore
 - No server deletion or file deletion

@@ -143,25 +143,35 @@ def installed_majors(runtimes: Optional[List[Dict]] = None) -> List[int]:
 def minecraft_version_to_java(mc_version: Optional[str]) -> Optional[int]:
     """Best-effort: the Java major version a Minecraft version needs.
 
-    Mapping (mapped onto the allowed set 8/17/21):
+    Mapping (mapped onto the allowed set 8/17/21/25):
       * <= 1.16.x          -> 8
       * 1.17.x .. 1.20.4   -> 17
       * 1.20.5+ / 1.21+    -> 21
+      * new "year" scheme  -> 25   (e.g. 26.1.2; the post-1.x snapshot/release
+                                    line that ships requiring a current JDK)
 
     Returns ``None`` when the version cannot be parsed (e.g. "Unknown").
     """
     if not mc_version:
         return None
-    m = re.match(r"1\.(\d+)(?:\.(\d+))?", mc_version.strip())
-    if not m:
-        return None
-    minor = int(m.group(1))
-    patch = int(m.group(2)) if m.group(2) else 0
-    if minor <= 16:
-        return 8
-    if minor < 20 or (minor == 20 and patch < 5):
-        return 17
-    return 21
+    version = mc_version.strip()
+    m = re.match(r"1\.(\d+)(?:\.(\d+))?", version)
+    if m:
+        minor = int(m.group(1))
+        patch = int(m.group(2)) if m.group(2) else 0
+        if minor <= 16:
+            return 8
+        if minor < 20 or (minor == 20 and patch < 5):
+            return 17
+        return 21
+    # Not the legacy "1.<minor>" line. Newer Minecraft builds moved to a
+    # year-based version string (e.g. "26.1.2"); these need a current JDK, so we
+    # recommend the newest allowed runtime (Java 25). Anything whose leading
+    # number is >= 2 is treated as this new scheme.
+    modern = re.match(r"(\d+)", version)
+    if modern and int(modern.group(1)) >= 2:
+        return 25
+    return None
 
 
 def required_versions(db: Session) -> List[int]:
@@ -180,6 +190,117 @@ def required_versions(db: Session) -> List[int]:
         required.add(config.JAVA_RECOMMENDED_VERSION)
     # Only surface versions we actually know how to install/recommend.
     return sorted(v for v in required if v in config.ALLOWED_JAVA_VERSIONS)
+
+
+# --- per-server runtime selection (v0.5) ---------------------------------------
+def find_runtime(path: str, runtimes: Optional[List[Dict]] = None) -> Optional[Dict]:
+    """Return the detected runtime whose binary resolves to ``path`` (or None).
+
+    Compared by real (symlink-resolved) path so ``/usr/bin/java`` and the JVM it
+    points at are treated as the same runtime.
+    """
+    if not path:
+        return None
+    if runtimes is None:
+        runtimes = detect_runtimes()
+    try:
+        target = os.path.realpath(path)
+    except OSError:
+        target = path
+    for rt in runtimes:
+        try:
+            if os.path.realpath(rt["path"]) == target:
+                return rt
+        except OSError:
+            if rt["path"] == path:
+                return rt
+    return None
+
+
+def is_known_runtime_path(path: str, runtimes: Optional[List[Dict]] = None) -> bool:
+    """Whether ``path`` is one of the Java runtimes detected on this host.
+
+    The per-server ``java_path`` is fed straight to ``subprocess.Popen`` at
+    launch, so the API only ever accepts a path we have actually detected — an
+    operator can never point a server at an arbitrary binary through the GUI.
+    """
+    return find_runtime(path, runtimes) is not None
+
+
+def runtime_for_major(
+    major: int, runtimes: Optional[List[Dict]] = None
+) -> Optional[Dict]:
+    """Return the first detected runtime providing Java ``major`` (or None)."""
+    if runtimes is None:
+        runtimes = detect_runtimes()
+    for rt in runtimes:
+        if rt["major"] == major:
+            return rt
+    return None
+
+
+def required_major_for_server(server: Server) -> Optional[int]:
+    """Java major version the server's Minecraft version *requires* (or None)."""
+    return minecraft_version_to_java(server.minecraft_version)
+
+
+def recommended_major_for_server(server: Server) -> int:
+    """Java major to recommend for a server: what it needs, else the default."""
+    required = required_major_for_server(server)
+    return required if required is not None else config.JAVA_RECOMMENDED_VERSION
+
+
+def server_java_info(server: Server) -> Dict:
+    """Assemble the per-server Java Runtime payload for the detail screen.
+
+    Read-only: probes the host for runtimes, inspects the server's current
+    ``java_path`` and works out the recommended/required Java and whether the
+    current selection is a mismatch (too old for the detected Minecraft version,
+    or pointing at a binary we cannot probe).
+    """
+    runtimes = detect_runtimes()
+    installed = installed_majors(runtimes)
+
+    current = find_runtime(server.java_path, runtimes)
+    current_major = current["major"] if current else None
+    current_version = current["version_string"] if current else None
+
+    required_major = required_major_for_server(server)
+    recommended_major = recommended_major_for_server(server)
+    recommended_rt = runtime_for_major(recommended_major, runtimes)
+
+    mismatch = False
+    mismatch_reason = ""
+    if current is None:
+        mismatch = True
+        mismatch_reason = (
+            "The configured Java path is not one of the detected runtimes "
+            "(it may have been removed or is not a working JVM)."
+        )
+    elif current_major is None:
+        mismatch = True
+        mismatch_reason = "Could not determine the Java version of the configured path."
+    elif required_major is not None and current_major < required_major:
+        mismatch = True
+        mismatch_reason = (
+            f"This server needs Java {required_major} but the selected runtime "
+            f"is Java {current_major}."
+        )
+
+    return {
+        "runtimes": runtimes,
+        "installed_majors": installed,
+        "current_path": server.java_path,
+        "current_major": current_major,
+        "current_version_string": current_version,
+        "required_major": required_major,
+        "recommended_major": recommended_major,
+        "recommended_path": recommended_rt["path"] if recommended_rt else None,
+        "recommended_installed": recommended_rt is not None,
+        "mismatch": mismatch,
+        "mismatch_reason": mismatch_reason,
+        "default_java_path": config.DEFAULT_JAVA_PATH,
+    }
 
 
 # --- OS / package helpers ------------------------------------------------------

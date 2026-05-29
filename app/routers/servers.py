@@ -27,6 +27,7 @@ from app.config import (
     DEFAULT_RETENTION_COUNT,
     DIFFICULTIES,
     GAMEMODES,
+    JAVA_RECOMMENDED_VERSION,
     SERVER_TYPES,
     SERVERS_DIR,
 )
@@ -39,6 +40,7 @@ from app.models import (
     Server,
 )
 from app.services import (
+    java_runtime,
     log_service,
     mod_service,
     properties_service,
@@ -73,6 +75,9 @@ _CREATE_DEFAULTS = {
     # "cached_version" (the latter pairs with cached_version below).
     "jar_source": "upload",
     "cached_version": "",
+    # v0.5: per-server Java runtime, chosen at create time. Empty means "let the
+    # context pre-select the recommended runtime (or fall back to the default)".
+    "java_path": "",
 }
 
 
@@ -82,9 +87,35 @@ def _cached_vanilla_choices(db: Session):
     return [r for r in rows if vanilla_downloader.jar_exists(r)]
 
 
+def _recommended_major_for_create(db: Session) -> int:
+    """Best-effort recommended Java for the create form.
+
+    The exact Minecraft version is only known up front when a cached Vanilla jar
+    is used, so we derive the recommendation from the latest cached jar when
+    present, otherwise fall back to the global recommended version.
+    """
+    latest = vanilla_downloader.get_latest_cached_jar(db)
+    if latest is not None and latest.version:
+        major = java_runtime.minecraft_version_to_java(latest.version)
+        if major is not None:
+            return major
+    return JAVA_RECOMMENDED_VERSION
+
+
 def _create_context(form: dict, db: Session, errors=None) -> dict:
     cached = _cached_vanilla_choices(db)
     latest = next((r for r in cached if r.is_latest), None)
+
+    # v0.5 Java runtime selection for the create form.
+    runtimes = java_runtime.detect_runtimes()
+    recommended_major = _recommended_major_for_create(db)
+    recommended_rt = java_runtime.runtime_for_major(recommended_major, runtimes)
+    # Pre-select: an explicit form value, else the recommended runtime, else the
+    # default java path (so the dropdown always has a sensible selection).
+    selected_java = (form.get("java_path") or "").strip()
+    if not selected_java:
+        selected_java = recommended_rt["path"] if recommended_rt else DEFAULT_JAVA_PATH
+
     return {
         "title": "Create Server",
         "server_types": SERVER_TYPES,
@@ -96,6 +127,11 @@ def _create_context(form: dict, db: Session, errors=None) -> dict:
         # v0.4 cached-jar options.
         "cached_jars": cached,
         "cached_latest": latest,
+        # v0.5 Java runtime selection.
+        "java_runtimes": runtimes,
+        "java_recommended_major": recommended_major,
+        "java_recommended_installed": recommended_rt is not None,
+        "java_selected_path": selected_java,
     }
 
 
@@ -255,6 +291,7 @@ async def create_server(
     eula_agree: Optional[str] = Form(None),
     jar_source: str = Form("upload"),
     cached_version: str = Form(""),
+    java_path: str = Form(""),
     jar_file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
 ):
@@ -292,7 +329,15 @@ async def create_server(
         "rcon_port": rcon_port,
         "jar_source": jar_source,
         "cached_version": cached_version,
+        "java_path": (java_path or "").strip(),
     }
+
+    # Resolve the chosen Java runtime. Only a detected runtime is accepted; an
+    # unknown/blank value falls back to the configured default so creation never
+    # fails on this alone (the runtime can be changed later on the detail page).
+    chosen_java = (java_path or "").strip()
+    if not java_runtime.is_known_runtime_path(chosen_java):
+        chosen_java = DEFAULT_JAVA_PATH
 
     def _fail(message, status=400):
         return templates.TemplateResponse(
@@ -382,7 +427,7 @@ async def create_server(
         name=name,
         server_path=str(server_dir.resolve()),
         jar_file="server.jar",
-        java_path=DEFAULT_JAVA_PATH,
+        java_path=chosen_java,
         min_memory=min_memory.strip() or DEFAULT_MIN_MEMORY,
         max_memory=max_memory.strip() or DEFAULT_MAX_MEMORY,
         status=STATUS_STOPPED,
@@ -451,6 +496,8 @@ def server_detail(server_id: int, request: Request, db: Session = Depends(get_db
             # is set — and the list of commands the v0.2 console allows.
             "rcon_password_set": bool(server.rcon_password),
             "allowed_commands": rcon_service.ALLOWED_COMMANDS,
+            # v0.5 per-server Java runtime selection.
+            "java_info": java_runtime.server_java_info(server),
             # v0.3 additions.
             "mods": mods,
             "plugins": plugins,
@@ -506,6 +553,24 @@ def console_status(server_id: int, db: Session = Depends(get_db)):
     # status so a vanished process is eventually marked stopped without hiding a
     # crash from this very response.
     payload = server_console.evaluate(server)
+
+    # Persist the detected runtime status and any parsed startup duration so they
+    # survive without live polling. Only commit on a real change to avoid a write
+    # on every 5s poll.
+    changed = False
+    detected = payload.get("detected_state")
+    if detected and server.last_runtime_status != detected:
+        server.last_runtime_status = detected
+        changed = True
+    duration = payload.get("startup_duration_seconds")
+    if duration is not None:
+        rounded = int(round(duration))
+        if server.last_startup_duration_seconds != rounded:
+            server.last_startup_duration_seconds = rounded
+            changed = True
+    if changed:
+        db.commit()
+
     server_process.refresh_status(db, server)
     return JSONResponse(payload)
 
@@ -633,6 +698,55 @@ def action_restart(server_id: int, db: Session = Depends(get_db)):
     except FileNotFoundError as exc:
         msg = f"Restart failed: {exc}"
     return _action_redirect(server_id, msg)
+
+
+@router.post("/{server_id}/kill")
+def action_kill(server_id: int, db: Session = Depends(get_db)):
+    """Force-kill (SIGKILL) — the explicit, operator-confirmed last resort.
+
+    This is the ONLY path that ever sends SIGKILL, and it is never automatic:
+    the UI guards it behind a confirmation dialog. A normal Stop still escalates
+    only as far as SIGTERM (see ``server_process.stop_server``).
+    """
+    server = _get_server_or_404(db, server_id)
+    msg = server_process.kill_server(db, server)
+    return _action_redirect(server_id, msg)
+
+
+@router.post("/{server_id}/java")
+def action_set_java(
+    server_id: int, java_path: str = Form(...), db: Session = Depends(get_db)
+):
+    """Set this server's Java runtime to one of the host's detected JREs.
+
+    Only a path we actually detected is accepted — the value is fed to
+    ``subprocess.Popen`` at launch, so an operator can never point a server at an
+    arbitrary binary. The system-wide ``/usr/bin/java`` alternatives link is left
+    untouched; only this server's ``java_path`` changes.
+    """
+    server = _get_server_or_404(db, server_id)
+    chosen = (java_path or "").strip()
+    runtimes = java_runtime.detect_runtimes()
+    rt = java_runtime.find_runtime(chosen, runtimes)
+    if rt is None:
+        return _action_redirect(
+            server_id,
+            "Java runtime not changed: that path is not one of the detected "
+            "runtimes. Pick one from the list.",
+        )
+
+    server.java_path = chosen
+    # Keep the displayed start command in step with the new runtime.
+    server.start_command = " ".join(server_process.build_start_command(server))
+    db.commit()
+
+    note = ""
+    if server.status == "running":
+        note = " The change applies the next time the server is started."
+    label = f"Java {rt['major']}" if rt.get("major") else "the selected runtime"
+    return _action_redirect(
+        server_id, f"Server Java runtime set to {label} ({chosen})." + note
+    )
 
 
 # ----- RCON (v0.2) ------------------------------------------------------------

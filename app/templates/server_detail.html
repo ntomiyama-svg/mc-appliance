@@ -11,6 +11,10 @@
   <form class="inline" method="post" action="/servers/{{ server.id }}/restart" data-confirm="Restart server '{{ server.name }}'?">
     <button class="btn restart" type="submit">↻ Restart</button>
   </form>
+  <form class="inline" method="post" action="/servers/{{ server.id }}/kill"
+        data-confirm="FORCE-KILL '{{ server.name }}' with SIGKILL? This does NOT save the world and may lose recent progress. Use only when a normal Stop has failed.">
+    <button class="btn stop" type="submit" {{ 'disabled' if server.status != 'running' else '' }}>✕ Kill</button>
+  </form>
   <a class="btn" href="/servers/{{ server.id }}/properties">✎ Edit properties</a>
   <form class="inline" method="post" action="/backups/create">
     <input type="hidden" name="server_id" value="{{ server.id }}">
@@ -31,6 +35,12 @@
       <tr><td>Jar</td><td>{{ server.jar_file or "—" }}</td></tr>
       <tr><td>Java</td><td>{{ server.java_path }}</td></tr>
       <tr><td>Memory</td><td>{{ server.min_memory }} / {{ server.max_memory }}</td></tr>
+      <tr><td>Last started</td><td>{{ (server.last_started_at | datetimefmt) if server.last_started_at else "—" }}</td></tr>
+      <tr><td>Last stopped</td><td>{{ (server.last_stopped_at | datetimefmt) if server.last_stopped_at else "—" }}</td></tr>
+      <tr><td>Last stop method</td><td>{{ server.last_stop_method or "—" }}</td></tr>
+      {% if server.last_stop_error %}<tr><td>Last stop error</td><td class="muted" style="font-size:12px">{{ server.last_stop_error }}</td></tr>{% endif %}
+      {% if server.last_start_error %}<tr><td>Last start error</td><td class="muted" style="font-size:12px; color:var(--danger)">{{ server.last_start_error }}</td></tr>{% endif %}
+      {% if server.last_startup_duration_seconds %}<tr><td>Last startup</td><td>{{ server.last_startup_duration_seconds }}s</td></tr>{% endif %}
       <tr><td>Registered</td><td>{{ server.created_at | datetimefmt }}</td></tr>
     </table>
   </div>
@@ -48,6 +58,67 @@
     </p>
     {% if detection.jar_candidates %}
     <p class="muted" style="font-size:12px">Jars found: {{ detection.jar_candidates | join(", ") }}</p>
+    {% endif %}
+  </div>
+</div>
+
+<h3 class="section-title">Java Runtime</h3>
+<div class="detail-grid" id="java-runtime">
+  <div class="card">
+    <h3 style="margin-top:0">Current runtime</h3>
+    <table class="kv">
+      <tr><td>Java path</td><td><code>{{ java_info.current_path }}</code></td></tr>
+      <tr><td>Detected version</td><td>
+        {% if java_info.current_major %}Java {{ java_info.current_major }}
+          <span class="muted" style="font-size:12px">({{ java_info.current_version_string }})</span>
+        {% else %}<span class="badge stopped">not detected</span>{% endif %}
+      </td></tr>
+      <tr><td>Required (this MC)</td><td>
+        {% if java_info.required_major %}Java {{ java_info.required_major }}{% else %}<span class="muted">unknown</span>{% endif %}
+      </td></tr>
+      <tr><td>Recommended</td><td>Java {{ java_info.recommended_major }}
+        {% if not java_info.recommended_installed %}<span class="muted" style="font-size:12px">(not installed)</span>{% endif %}
+      </td></tr>
+    </table>
+    {% if java_info.mismatch %}
+    <p class="hint" style="color:var(--danger)">⚠ Java mismatch: {{ java_info.mismatch_reason }}</p>
+    {% endif %}
+    {% if java_info.recommended_installed
+          and java_info.recommended_path != java_info.current_path %}
+    <form class="inline mt" method="post" action="/servers/{{ server.id }}/java">
+      <input type="hidden" name="java_path" value="{{ java_info.recommended_path }}">
+      <button class="btn primary" type="submit">Use Java {{ java_info.recommended_major }} for this server</button>
+    </form>
+    {% elif not java_info.recommended_installed %}
+    <p class="hint">Recommended Java {{ java_info.recommended_major }} is not installed.
+      <a href="/system/java">Install it from the Java Runtime Manager ↗</a></p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Choose runtime</h3>
+    {% if java_info.runtimes %}
+    <form method="post" action="/servers/{{ server.id }}/java" class="form-grid" style="max-width:none; gap:10px">
+      <div>
+        <label for="java_path_select">Detected Java runtimes</label>
+        <select id="java_path_select" name="java_path">
+          {% for rt in java_info.runtimes %}
+          <option value="{{ rt.path }}" {{ 'selected' if rt.path == java_info.current_path else '' }}>
+            {% if rt.major %}Java {{ rt.major }}{% else %}Java ?{% endif %} — {{ rt.path }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" type="submit">Save Java runtime</button>
+      </div>
+      <p class="hint">Only the per-server <code>java_path</code> changes; the
+        system-wide <code>/usr/bin/java</code> is left untouched. Restart the
+        server for a change to take effect.</p>
+    </form>
+    {% else %}
+    <p class="hint">No Java runtimes were detected on this host.
+      <a href="/system/java">Open the Java Runtime Manager ↗</a></p>
     {% endif %}
   </div>
 </div>
@@ -77,26 +148,35 @@
 
   <div class="card">
     <h3 style="margin-top:0">RCON settings</h3>
-    <form method="post" action="/servers/{{ server.id }}/rcon/settings" class="form-grid" style="gap:10px; max-width:none">
-      <label class="check"><input type="checkbox" name="rcon_enabled" value="true" {{ 'checked' if server.rcon_enabled else '' }}> enable-rcon</label>
+    <form method="post" action="/servers/{{ server.id }}/rcon/settings" class="form-grid"
+          style="gap:10px; max-width:none"
+          data-rcon-password-set="{{ '1' if rcon_password_set else '0' }}">
+      <label class="check"><input type="checkbox" id="rcon-enabled" name="rcon_enabled" value="true" {{ 'checked' if server.rcon_enabled else '' }}> enable-rcon</label>
       <div>
         <label>Connect host</label>
         <input type="text" name="rcon_host" value="{{ server.rcon_host }}">
       </div>
       <div>
         <label>rcon.port</label>
-        <input type="text" name="rcon_port" value="{{ server.rcon_port }}">
+        <input type="text" id="rcon-port" name="rcon_port" value="{{ server.rcon_port }}">
       </div>
       <div>
         <label>rcon.password</label>
-        <input type="text" id="rcon-password" name="rcon_password" autocomplete="new-password"
-               placeholder="{{ 'leave blank to keep current password' if rcon_password_set else 'not set — generate or type one' }}">
-        <p class="hint">Never shown after saving. Leave blank to keep the current password.</p>
+        <div class="btn-row" style="gap:6px; flex-wrap:nowrap">
+          <input type="password" id="rcon-password" name="rcon_password" autocomplete="new-password"
+                 style="flex:1"
+                 placeholder="{{ 'leave blank to keep current password' if rcon_password_set else 'not set — generate or type one' }}">
+          <button class="btn" type="button" id="rcon-showpw-btn">👁 Show</button>
+        </div>
+        <p class="hint">Masked here and never shown after saving. Leave blank to keep the current password.</p>
       </div>
       <div class="btn-row">
-        <button class="btn" type="button" id="rcon-genpw-btn">🎲 Generate</button>
+        <button class="btn" type="button" id="rcon-genpw-btn">🎲 Generate &amp; enable RCON</button>
         <button class="btn primary" type="submit">Save RCON settings</button>
       </div>
+      <p class="hint">“Generate &amp; enable RCON” fills a strong random password, ticks
+        <code>enable-rcon</code> and sets <code>rcon.port=25575</code> (if unset). Review, then
+        <strong>Save</strong> to write it to <code>server.properties</code> and the database.</p>
       <p class="hint">⚠ After changing RCON settings you must <strong>restart the Minecraft server</strong> for them to take effect.</p>
     </form>
   </div>

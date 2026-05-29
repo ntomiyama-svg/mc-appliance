@@ -150,6 +150,8 @@ tr:last-child td { border-bottom: none; }
 .badge.unknown { background: #2a2a30; color: var(--muted); border: 1px solid var(--border); }
 .badge.starting { background: #2c2a16; color: #e3c14a; border: 1px solid var(--warn); }
 .badge.crashed { background: #3a1d1b; color: #ff938c; border: 1px solid var(--danger); }
+.badge.stopping { background: #2c2a16; color: #e3c14a; border: 1px solid var(--warn); }
+.badge.failed_to_start { background: #3a1d1b; color: #ff938c; border: 1px solid var(--danger); }
 .badge.type { background: #14283d; color: #79c0ff; border: 1px solid #265e8a; }
 
 /* Console / live-log viewer (v0.5) */

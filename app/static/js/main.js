@@ -101,16 +101,42 @@ function initRcon() {
     });
   }
 
+  // Show / hide the masked password field.
+  const showBtn = document.getElementById("rcon-showpw-btn");
+  if (showBtn) {
+    showBtn.addEventListener("click", () => {
+      const inp = document.getElementById("rcon-password");
+      if (!inp) return;
+      const showing = inp.type === "text";
+      inp.type = showing ? "password" : "text";
+      showBtn.textContent = showing ? "👁 Show" : "🙈 Hide";
+    });
+  }
+
   const genBtn = document.getElementById("rcon-genpw-btn");
   if (genBtn) {
     genBtn.addEventListener("click", () => {
+      const inp = document.getElementById("rcon-password");
+      // Confirm before clobbering an already-configured password.
+      const form = genBtn.closest("form");
+      const alreadySet = form && form.dataset.rconPasswordSet === "1";
+      if ((alreadySet || (inp && inp.value)) &&
+          !window.confirm("Overwrite the current RCON password with a new random one?")) {
+        return;
+      }
       rconPost("/rcon/generate-password", {})
         .then((res) => {
-          const inp = document.getElementById("rcon-password");
-          if (res.ok && inp) {
-            inp.value = res.password;
-            inp.focus();
-          }
+          if (!res.ok || !inp) return;
+          inp.value = res.password;
+          // Reveal the freshly generated password so the admin can note it.
+          inp.type = "text";
+          if (showBtn) showBtn.textContent = "🙈 Hide";
+          inp.focus();
+          // Generating a password implies the operator wants RCON on.
+          const enable = document.getElementById("rcon-enabled");
+          if (enable) enable.checked = true;
+          const port = document.getElementById("rcon-port");
+          if (port && (!port.value || !port.value.trim())) port.value = "25575";
         })
         .catch((e) => alert("Could not generate password: " + e.message));
     });
@@ -233,8 +259,29 @@ function initConsole() {
     conSetText("con-actual-status", s.actual_status || "—");
     conSetText("con-pid", s.pid != null ? s.pid : "—");
     conSetText("con-proc", s.process_exists ? "yes" : "no");
+    let portText = "—";
+    if (s.server_port) {
+      if (s.port_listening === true) portText = s.server_port + " (listening)";
+      else if (s.port_listening === false) portText = s.server_port + " (not listening)";
+      else portText = String(s.server_port);
+    }
+    conSetText("con-port", portText);
+    conSetText("con-startup", s.startup_duration_seconds != null ? s.startup_duration_seconds + "s" : "—");
+    conSetText("con-stop-method", s.last_stop_method || "—");
+    conSetText("con-last-started", s.last_started_at || "—");
+    conSetText("con-last-stopped", s.last_stopped_at || "—");
     conSetText("con-latest-mtime", s.latest_log_exists ? (s.latest_log_mtime || "—") : "no file");
     conSetText("con-managed-mtime", s.managed_log_exists ? (s.managed_log_mtime || "—") : "no file");
+
+    const errEl = document.getElementById("con-last-error");
+    if (errEl) {
+      if (s.last_error_summary) {
+        errEl.textContent = "⚠ " + s.last_error_summary;
+        errEl.style.display = "";
+      } else {
+        errEl.style.display = "none";
+      }
+    }
   }
 
   function refreshStatus() {

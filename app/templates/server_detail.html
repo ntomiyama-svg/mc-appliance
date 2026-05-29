@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="btn-row" style="margin-bottom:18px">
+  <form class="inline" method="post" action="/servers/{{ server.id }}/start">
+    <button class="btn start" type="submit" {{ 'disabled' if server.status == 'running' else '' }}>▶ Start</button>
+  </form>
+  <form class="inline" method="post" action="/servers/{{ server.id }}/stop" data-confirm="Stop server '{{ server.name }}'?">
+    <button class="btn stop" type="submit" {{ 'disabled' if server.status != 'running' else '' }}>■ Stop</button>
+  </form>
+  <form class="inline" method="post" action="/servers/{{ server.id }}/restart" data-confirm="Restart server '{{ server.name }}'?">
+    <button class="btn restart" type="submit">↻ Restart</button>
+  </form>
+  <a class="btn" href="/servers/{{ server.id }}/properties">✎ Edit properties</a>
+  <form class="inline" method="post" action="/backups/create">
+    <input type="hidden" name="server_id" value="{{ server.id }}">
+    <input type="hidden" name="exclude_logs" value="true">
+    <input type="hidden" name="exclude_backups" value="true">
+    <button class="btn" type="submit">💾 Create backup</button>
+  </form>
+</div>
+
+<div class="detail-grid">
+  <div class="card">
+    <h3 style="margin-top:0">Basic info</h3>
+    <table class="kv">
+      <tr><td>Status</td><td><span class="badge {{ server.status }}">{{ server.status }}</span></td></tr>
+      <tr><td>PID</td><td>{{ server.pid or "—" }}</td></tr>
+      <tr><td>Type</td><td>{{ server.minecraft_type }}{% if server.minecraft_version %} {{ server.minecraft_version }}{% endif %}</td></tr>
+      <tr><td>Path</td><td>{{ server.server_path }}</td></tr>
+      <tr><td>Jar</td><td>{{ server.jar_file or "—" }}</td></tr>
+      <tr><td>Java</td><td>{{ server.java_path }}</td></tr>
+      <tr><td>Memory</td><td>{{ server.min_memory }} / {{ server.max_memory }}</td></tr>
+      <tr><td>Registered</td><td>{{ server.created_at | datetimefmt }}</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Detected files</h3>
+    <p class="checks">
+      <span class="{{ 'ok' if detection.has_server_properties else 'no' }}">{{ '✓' if detection.has_server_properties else '✗' }} server.properties</span>
+      <span class="{{ 'ok' if detection.has_eula else 'no' }}">{{ '✓' if detection.has_eula else '✗' }} eula.txt</span><br>
+      <span class="{{ 'ok' if detection.has_latest_log else 'no' }}">{{ '✓' if detection.has_latest_log else '✗' }} logs/latest.log</span>
+      <span class="{{ 'ok' if detection.has_world else 'no' }}">{{ '✓' if detection.has_world else '✗' }} world/</span><br>
+      <span class="{{ 'ok' if detection.has_mods else 'no' }}">{{ '✓' if detection.has_mods else '✗' }} mods/</span>
+      <span class="{{ 'ok' if detection.has_plugins else 'no' }}">{{ '✓' if detection.has_plugins else '✗' }} plugins/</span>
+      <span class="{{ 'ok' if detection.has_config else 'no' }}">{{ '✓' if detection.has_config else '✗' }} config/</span>
+    </p>
+    {% if detection.jar_candidates %}
+    <p class="muted" style="font-size:12px">Jars found: {{ detection.jar_candidates | join(", ") }}</p>
+    {% endif %}
+  </div>
+</div>
+
+<h3 class="section-title">Start command</h3>
+<div class="cmdbox">{{ start_command }}</div>
+
+<h3 class="section-title">latest.log (last 200 lines)</h3>
+<div class="logbox" id="logbox" data-url="/servers/{{ server.id }}/log/raw">{{ log_text }}</div>
+
+{% endblock %}

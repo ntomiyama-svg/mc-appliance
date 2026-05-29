@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Runtime data (keep the directories, ignore their contents)
+data/*
+backups/*
+!data/.gitkeep
+!backups/.gitkeep
+*.db
+*.sqlite3
+
+# Logs / backups produced at runtime
+*.log
+*.bak
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp

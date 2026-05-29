@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="stat-grid">
+  <div class="card stat">
+    <div class="label">Registered Servers</div>
+    <div class="value">{{ server_count }}</div>
+    <div class="sub"><a href="/servers">Manage servers →</a></div>
+  </div>
+
+  <div class="card stat">
+    <div class="label">Running Servers</div>
+    <div class="value">{{ running_count }}</div>
+    <div class="sub">{{ server_count - running_count }} stopped</div>
+  </div>
+
+  <div class="card stat">
+    <div class="label">CPU Usage</div>
+    <div class="value"><span id="m-cpu">{{ metrics.cpu_percent }}%</span></div>
+    <div class="bar"><span id="bar-cpu" style="width: {{ metrics.cpu_percent }}%"></span></div>
+  </div>
+
+  <div class="card stat">
+    <div class="label">Memory Usage</div>
+    <div class="value"><span id="m-mem">{{ metrics.mem_percent }}%</span></div>
+    <div class="bar"><span id="bar-mem" style="width: {{ metrics.mem_percent }}%"></span></div>
+    <div class="sub">{{ metrics.mem_used_gb }} / {{ metrics.mem_total_gb }} GB</div>
+  </div>
+
+  <div class="card stat">
+    <div class="label">Disk Usage</div>
+    <div class="value"><span id="m-disk">{{ metrics.disk_percent }}%</span></div>
+    <div class="bar"><span id="bar-disk" style="width: {{ metrics.disk_percent }}%"></span></div>
+    <div class="sub">{{ metrics.disk_used_gb }} / {{ metrics.disk_total_gb }} GB</div>
+  </div>
+</div>
+
+<div class="card">
+  <p class="muted" style="margin:0">
+    Metrics auto-refresh every 5 seconds. This is the v0.1 MVP — do not expose this
+    instance directly to the internet.
+  </p>
+</div>
+
+{% endblock %}

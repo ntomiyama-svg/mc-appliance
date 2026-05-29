@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <table class="kv">
+    <tr><td>Hostname</td><td>{{ info.hostname }}</td></tr>
+    <tr><td>OS</td><td>{{ info.os }}</td></tr>
+    <tr><td>OS detail</td><td>{{ info.os_detail }}</td></tr>
+    <tr><td>IP address</td><td>{{ info.ip_address }}</td></tr>
+    <tr><td>CPU cores</td><td>{{ info.cpu_count }}</td></tr>
+    <tr><td>Python</td><td>{{ info.python_version }}</td></tr>
+    <tr><td>Java</td><td>{{ info.java_version }}</td></tr>
+    <tr><td>Disk</td><td>{{ info.disk_used_gb }} GB used / {{ info.disk_total_gb }} GB total ({{ info.disk_free_gb }} GB free)</td></tr>
+  </table>
+</div>
+
+{% endblock %}

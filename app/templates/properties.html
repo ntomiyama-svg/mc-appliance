@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+
+<p><a href="/servers/{{ server.id }}">← Back to {{ server.name }}</a></p>
+
+{% if not exists %}
+<div class="card">
+  <p class="muted" style="margin:0">server.properties not found in <code>{{ server.server_path }}</code>.</p>
+</div>
+{% else %}
+<div class="card">
+  <p class="muted">Editing <code>{{ server.server_path }}/server.properties</code>. A <code>.bak</code> copy is created on every save. Only existing keys are editable in v0.1.</p>
+  <form method="post" action="/servers/{{ server.id }}/properties">
+    <div class="form-grid" style="max-width:760px">
+      {% for key, value in props.items() %}
+      <div>
+        <label for="prop__{{ key }}">{{ key }}</label>
+        <input type="text" id="prop__{{ key }}" name="prop__{{ key }}" value="{{ value }}">
+      </div>
+      {% endfor %}
+      <div><button class="btn primary" type="submit">Save properties</button></div>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+{% endblock %}

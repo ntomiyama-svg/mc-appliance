@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if backups %}
+<table>
+  <thead>
+    <tr>
+      <th>Backup</th>
+      <th>Server</th>
+      <th>Size</th>
+      <th>Created</th>
+      <th>Path</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for b in backups %}
+    <tr>
+      <td>{{ b.backup_name }}</td>
+      <td>{{ servers.get(b.server_id, "server #" ~ b.server_id) }}</td>
+      <td>{{ b.size_bytes | humansize }}</td>
+      <td>{{ b.created_at | datetimefmt }}</td>
+      <td class="muted" style="font-size:12px">{{ b.backup_path }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="card">
+  <p class="muted" style="margin:0">No backups yet. Open a server's detail page and click <strong>Create backup</strong>.</p>
+</div>
+{% endif %}
+
+{% endblock %}

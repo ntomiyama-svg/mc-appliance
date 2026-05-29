@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if errors %}
+<div class="errors">
+  <strong>Could not register server:</strong>
+  <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 style="margin-top:0">Step 1 — Scan a folder</h3>
+  <form method="get" action="/servers/register">
+    <div class="form-grid">
+      <div>
+        <label for="path">Server folder path</label>
+        <input type="text" id="path" name="path" value="{{ path }}" placeholder="/srv/minecraft/survival">
+        <div class="hint">Enter the absolute path of an existing Minecraft server folder, then scan to auto-detect.</div>
+      </div>
+      <div><button class="btn" type="submit">🔍 Scan folder</button></div>
+    </div>
+  </form>
+</div>
+
+{% if detection is not none %}
+<h3 class="section-title">Detection result</h3>
+<div class="card">
+  <p class="checks">
+    <span class="{{ 'ok' if detection.has_server_properties else 'no' }}">{{ '✓' if detection.has_server_properties else '✗' }} server.properties</span>
+    <span class="{{ 'ok' if detection.has_eula else 'no' }}">{{ '✓' if detection.has_eula else '✗' }} eula.txt</span>
+    <span class="{{ 'ok' if detection.has_latest_log else 'no' }}">{{ '✓' if detection.has_latest_log else '✗' }} logs/latest.log</span>
+    <span class="{{ 'ok' if detection.has_world else 'no' }}">{{ '✓' if detection.has_world else '✗' }} world/</span>
+    <span class="{{ 'ok' if detection.has_mods else 'no' }}">{{ '✓' if detection.has_mods else '✗' }} mods/</span>
+    <span class="{{ 'ok' if detection.has_plugins else 'no' }}">{{ '✓' if detection.has_plugins else '✗' }} plugins/</span>
+    <span class="{{ 'ok' if detection.has_config else 'no' }}">{{ '✓' if detection.has_config else '✗' }} config/</span>
+  </p>
+  <p>Detected type: <span class="badge type">{{ detection.minecraft_type }}{% if detection.minecraft_version %} {{ detection.minecraft_version }}{% endif %}</span></p>
+
+  {% if detection.jar_candidates %}
+  <h3 class="section-title">Step 2 — Register</h3>
+  <form method="post" action="/servers/register">
+    <input type="hidden" name="server_path" value="{{ path }}">
+    <div class="form-grid">
+      <div>
+        <label for="name">Display name</label>
+        <input type="text" id="name" name="name" value="{{ (form.name if form else '') }}" required>
+      </div>
+      <div>
+        <label for="jar_file">Jar file (inside the folder)</label>
+        <select id="jar_file" name="jar_file">
+          {% for jar in detection.jar_candidates %}
+          <option value="{{ jar }}">{{ jar }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="java_path">Java path</label>
+        <input type="text" id="java_path" name="java_path" value="{{ (form.java_path if form else defaults.java_path) }}">
+      </div>
+      <div>
+        <label for="min_memory">Min memory (-Xms)</label>
+        <input type="text" id="min_memory" name="min_memory" value="{{ (form.min_memory if form else defaults.min_memory) }}">
+      </div>
+      <div>
+        <label for="max_memory">Max memory (-Xmx)</label>
+        <input type="text" id="max_memory" name="max_memory" value="{{ (form.max_memory if form else defaults.max_memory) }}">
+      </div>
+      <div><button class="btn primary" type="submit">Register server</button></div>
+    </div>
+  </form>
+  {% else %}
+  <p class="muted">No <code>.jar</code> file was found in this folder, so it cannot be registered as a server.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

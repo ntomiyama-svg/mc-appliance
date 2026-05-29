@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="mt" style="margin-bottom:16px">
+  <a class="btn primary" href="/servers/register">＋ Register Server</a>
+</div>
+
+{% if servers %}
+<table>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Type</th>
+      <th>Status</th>
+      <th>PID</th>
+      <th>Path</th>
+      <th class="right">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in servers %}
+    <tr>
+      <td><a href="/servers/{{ s.id }}">{{ s.name }}</a></td>
+      <td><span class="badge type">{{ s.minecraft_type }}{% if s.minecraft_version %} {{ s.minecraft_version }}{% endif %}</span></td>
+      <td><span class="badge {{ s.status }}">{{ s.status }}</span></td>
+      <td>{{ s.pid or "—" }}</td>
+      <td class="muted" style="font-size:12px">{{ s.server_path }}</td>
+      <td class="right">
+        <div class="btn-row">
+          <form class="inline" method="post" action="/servers/{{ s.id }}/start">
+            <button class="btn start" type="submit" {{ 'disabled' if s.status == 'running' else '' }}>Start</button>
+          </form>
+          <form class="inline" method="post" action="/servers/{{ s.id }}/stop" data-confirm="Stop server '{{ s.name }}'?">
+            <button class="btn stop" type="submit" {{ 'disabled' if s.status != 'running' else '' }}>Stop</button>
+          </form>
+          <form class="inline" method="post" action="/servers/{{ s.id }}/restart" data-confirm="Restart server '{{ s.name }}'?">
+            <button class="btn restart" type="submit">Restart</button>
+          </form>
+          <a class="btn" href="/servers/{{ s.id }}">Detail</a>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="card">
+  <p class="muted" style="margin:0">No servers registered yet. Click <strong>Register Server</strong> to add an existing Minecraft server folder.</p>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 #
-# Rocky Linux 9 development-preparation script for mc-appliance.
+# Rocky Linux 9 / RHEL 9 OS-package installation for mc-appliance.
 #
-# This is NOT a production installer. It only installs the OS packages needed
-# to develop and run the v0.1 MVP. It makes no destructive changes: it does not
-# create users, open firewall ports, configure systemd services, or touch any
-# existing Minecraft data.
+# This installs ONLY the OS packages mc-appliance needs (Python toolchain, git,
+# zip utilities, a JRE for running servers). It makes no other changes: it does
+# not create users, open firewall ports, configure systemd, or touch existing
+# Minecraft data.
 #
-# Run with sudo (it only uses sudo for `dnf install`):
-#   sudo bash scripts/install_rocky9.sh
+# Two ways to use it:
+#   * Standalone (dev preparation):   sudo bash scripts/install_rocky9.sh
+#   * Called by the full installer:   scripts/install.sh delegates here when it
+#     detects dnf, so the package list lives in exactly one place.
+#
+# It works whether invoked as root (sudo not required) or as a normal user with
+# sudo available.
 set -euo pipefail
 
 if ! command -v dnf >/dev/null 2>&1; then
@@ -16,14 +21,26 @@ if ! command -v dnf >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[install_rocky9] Installing development packages via dnf ..."
+# Use sudo only when we are not already root.
+if [[ "$(id -u)" -eq 0 ]]; then
+  SUDO=""
+elif command -v sudo >/dev/null 2>&1; then
+  SUDO="sudo"
+else
+  echo "ERROR: need root privileges to install packages, but sudo is not available." >&2
+  echo "       Re-run this script as root." >&2
+  exit 1
+fi
 
-# Python 3.11 toolchain, git, zip utilities, and a JRE/JDK for running servers.
+echo "[install_rocky9] Installing OS packages via dnf ..."
+
+# Python toolchain, git, zip utilities, tar (for the installer's file copy) and
+# a JRE/JDK for running servers.
 PACKAGES=(
   python3
   python3-pip
-  python3-virtualenv
   git
+  tar
   zip
   unzip
   # OpenJDK 17 is a common baseline for modern Minecraft servers. Adjust as
@@ -31,13 +48,6 @@ PACKAGES=(
   java-17-openjdk-headless
 )
 
-sudo dnf install -y "${PACKAGES[@]}"
+$SUDO dnf install -y "${PACKAGES[@]}"
 
-echo
-echo "[install_rocky9] Done. Next steps (as a NON-root user):"
-echo "  cd to the project directory"
-echo "  bash scripts/dev_run.sh"
-echo
-echo "NOTE: This script intentionally does not configure firewall, systemd, or"
-echo "      HTTPS. Those belong to v0.2+. Do not expose the dev server to the"
-echo "      public internet."
+echo "[install_rocky9] OS packages installed."

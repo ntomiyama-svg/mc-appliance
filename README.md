@@ -249,6 +249,31 @@ RCON mirrored). `SERVERS_DIR` defaults to `./data/servers` in a dev checkout and
 > are all created **without a real Minecraft server**. Actually *starting* it
 > still needs a runnable jar and working Java (unchanged from v0.1).
 
+### Vanilla server jar cache (v0.4)
+
+Since **v0.4** you can fetch the official **Vanilla** Minecraft Java Edition
+`server.jar` from Mojang and cache it locally, then create a server from the
+cached jar instead of uploading one. Full details:
+[`docs/13_vanilla_jar_cache.md`](docs/13_vanilla_jar_cache.md).
+
+1. Open **JAR Cache** in the sidebar (`/jars/vanilla`).
+2. Click **Check latest** to see the current release, then **Download latest**
+   to cache its `server.jar`. The table lists cached versions, sizes and
+   download times.
+3. On **Servers → Create Server**, set **server.jar source** to *Use cached
+   latest Vanilla server.jar* or *Use cached Vanilla version*. The cached jar is
+   copied to `<server>/server.jar`. (You still must accept the EULA.)
+
+Cached jars live under `JAR_CACHE_DIR` — `./data/jars` in a dev checkout and
+`/var/lib/mc-appliance/jars` under a system install (one folder per version).
+
+> **Vanilla only.** Paper/Fabric/Forge/NeoForge still require a jar upload. This
+> is **separate** from RCON and from running servers, and it needs **outbound
+> internet** to Mojang. Only the `server.jar` URL resolved *through* the Mojang
+> manifest is ever downloaded — there is **no arbitrary-URL download**. SHA-1 is
+> verified when Mojang provides it. In **offline** environments, use the upload
+> path; the dashboard warning/checks degrade silently and never crash the app.
+
 ### Mods & Plugins (v0.3)
 
 Each server's detail page has **Mods** and **Plugins** sections: upload `.jar`
@@ -340,6 +365,7 @@ See [`docs/06_future_plan.md`](docs/06_future_plan.md). Highlights:
 - v0.1.2: administrator login (single admin, cookie sessions) ✅
 - v0.2: RCON-based safe stop + allow-listed console + `save-all` before backups ✅
 - v0.3: GUI server creation, mod/plugin management, scheduled backups ✅
+- v0.4: Vanilla server.jar cache (Mojang manifest fetch + create-from-cache) ✅
 - v0.2+ (pending): HTTPS, CSRF tokens, multi-user/roles, systemd unit management
 - v0.3+ (pending): backup restore, backup retention pruning, multi-user roles
 - Later: Rocky Linux appliance image, Ubuntu/Debian support
@@ -357,3 +383,4 @@ See [`docs/06_future_plan.md`](docs/06_future_plan.md). Highlights:
 - [`docs/10_server_creation.md`](docs/10_server_creation.md)
 - [`docs/11_mod_plugin_management.md`](docs/11_mod_plugin_management.md)
 - [`docs/12_backup_schedule.md`](docs/12_backup_schedule.md)
+- [`docs/13_vanilla_jar_cache.md`](docs/13_vanilla_jar_cache.md)

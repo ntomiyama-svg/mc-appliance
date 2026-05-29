@@ -37,6 +37,7 @@ from app.services import (
     server_creator,
     server_detector,
     server_process,
+    vanilla_downloader,
 )
 from app.templating import templates
 
@@ -57,10 +58,22 @@ _CREATE_DEFAULTS = {
     "online_mode": True,
     "enable_rcon": False,
     "rcon_port": str(DEFAULT_RCON_PORT),
+    # v0.4: how the server.jar is provided — "upload", "cached_latest" or
+    # "cached_version" (the latter pairs with cached_version below).
+    "jar_source": "upload",
+    "cached_version": "",
 }
 
 
-def _create_context(form: dict, errors=None) -> dict:
+def _cached_vanilla_choices(db: Session):
+    """Return cached Vanilla jars (file present) for the create-form dropdown."""
+    rows = vanilla_downloader.list_cached_vanilla_jars(db)
+    return [r for r in rows if vanilla_downloader.jar_exists(r)]
+
+
+def _create_context(form: dict, db: Session, errors=None) -> dict:
+    cached = _cached_vanilla_choices(db)
+    latest = next((r for r in cached if r.is_latest), None)
     return {
         "title": "Create Server",
         "server_types": SERVER_TYPES,
@@ -69,6 +82,9 @@ def _create_context(form: dict, errors=None) -> dict:
         "servers_dir": str(SERVERS_DIR),
         "form": form,
         "errors": errors or [],
+        # v0.4 cached-jar options.
+        "cached_jars": cached,
+        "cached_latest": latest,
     }
 
 
@@ -203,9 +219,9 @@ def register_server(
 
 
 @router.get("/create", response_class=HTMLResponse)
-def create_form(request: Request):
+def create_form(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
-        request, "server_create.html", _create_context(dict(_CREATE_DEFAULTS))
+        request, "server_create.html", _create_context(dict(_CREATE_DEFAULTS), db)
     )
 
 
@@ -226,6 +242,8 @@ async def create_server(
     rcon_port: str = Form(str(DEFAULT_RCON_PORT)),
     rcon_password: str = Form(""),
     eula_agree: Optional[str] = Form(None),
+    jar_source: str = Form("upload"),
+    cached_version: str = Form(""),
     jar_file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
 ):
@@ -236,6 +254,16 @@ async def create_server(
     enable_rcon_b = _checked(enable_rcon)
     eula_b = _checked(eula_agree)
     server_type = server_type if server_type in SERVER_TYPES else SERVER_TYPES[0]
+
+    # v0.4: jar source. Cached Vanilla jars are only offered for Vanilla servers;
+    # any other type falls back to upload (Paper/Fabric/etc auto-fetch is not yet
+    # implemented). Unknown source values degrade to "upload".
+    jar_source = (jar_source or "upload").strip()
+    if jar_source not in ("upload", "cached_latest", "cached_version"):
+        jar_source = "upload"
+    if server_type != "Vanilla" and jar_source != "upload":
+        jar_source = "upload"
+    cached_version = (cached_version or "").strip()
 
     # Echo the submitted values back if we have to re-render with errors.
     form = {
@@ -251,20 +279,51 @@ async def create_server(
         "online_mode": online_mode_b,
         "enable_rcon": enable_rcon_b,
         "rcon_port": rcon_port,
+        "jar_source": jar_source,
+        "cached_version": cached_version,
     }
 
     def _fail(message, status=400):
         return templates.TemplateResponse(
             request,
             "server_create.html",
-            _create_context(form, errors=[message]),
+            _create_context(form, db, errors=[message]),
             status_code=status,
         )
+
+    # Resolve the cached jar source (if any) up-front so we never build a
+    # half-finished directory when the chosen jar is missing. ``cached_jar_path``
+    # and ``cached_jar_version`` stay None for the upload path.
+    cached_jar_path = None
+    cached_jar_version = None
+    if jar_source == "cached_latest":
+        latest_row = vanilla_downloader.get_latest_cached_jar(db)
+        if latest_row is None:
+            return _fail(
+                "No cached latest Vanilla jar is available. Download it from "
+                "JAR Cache first, or upload a jar."
+            )
+        cached_jar_path = latest_row.jar_path
+        cached_jar_version = latest_row.version
+    elif jar_source == "cached_version":
+        if not cached_version:
+            return _fail("Choose a cached Vanilla version, or pick another jar source.")
+        path = vanilla_downloader.get_cached_jar_path(db, cached_version)
+        if path is None:
+            return _fail(
+                f"Cached Vanilla version '{cached_version}' is not available on disk."
+            )
+        cached_jar_path = str(path)
+        cached_jar_version = cached_version
 
     # A jar upload is optional (you may not have one without a real server), but
     # buffer/validate it up-front so a bad upload never creates a half-built dir.
     jar_buffer = None
-    has_jar = jar_file is not None and bool((jar_file.filename or "").strip())
+    has_upload = (
+        jar_source == "upload"
+        and jar_file is not None
+        and bool((jar_file.filename or "").strip())
+    )
     try:
         name = server_creator.validate_server_name(server_name)
         if db.query(Server).filter(Server.name == name).first():
@@ -276,7 +335,7 @@ async def create_server(
         if not eula_b:
             return _fail("You must accept the Minecraft EULA to create a server.")
 
-        if has_jar:
+        if has_upload:
             jar_buffer = await server_creator.buffer_jar_upload(jar_file)
 
         # All validation passed — create the directory and lay down files.
@@ -300,6 +359,8 @@ async def create_server(
         server_creator.ensure_mod_plugin_dirs(server_dir)
         if jar_buffer is not None:
             server_creator.save_jar(server_dir, jar_buffer)
+        elif cached_jar_path is not None:
+            server_creator.place_cached_jar(server_dir, cached_jar_path)
     except server_creator.CreationError as exc:
         return _fail(str(exc))
     finally:
@@ -315,6 +376,8 @@ async def create_server(
         max_memory=max_memory.strip() or DEFAULT_MAX_MEMORY,
         status=STATUS_STOPPED,
         minecraft_type=server_type,
+        # When we copied a cached Vanilla jar we know the exact version.
+        minecraft_version=cached_jar_version,
         has_mods=True,
         has_plugins=True,
         rcon_enabled=enable_rcon_b,
@@ -327,12 +390,14 @@ async def create_server(
     db.commit()
     db.refresh(server)
 
+    if has_upload:
+        jar_note = "server.jar uploaded. "
+    elif cached_jar_version is not None:
+        jar_note = f"Cached Vanilla {cached_jar_version} copied as server.jar. "
+    else:
+        jar_note = "No jar provided yet. "
     return RedirectResponse(
-        url=f"/servers/{server.id}?msg="
-        + quote(
-            "Server created. "
-            + ("server.jar uploaded. " if has_jar else "No jar uploaded yet. ")
-        ),
+        url=f"/servers/{server.id}?msg=" + quote("Server created. " + jar_note),
         status_code=303,
     )
 

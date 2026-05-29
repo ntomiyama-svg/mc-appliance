@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -138,3 +139,50 @@ class BackupSchedule(Base):
     )
 
     server = relationship("Server", backref="schedules")
+
+
+# Jar-cache source / type constants.
+JAR_SOURCE_MOJANG = "mojang"
+JAR_TYPE_VANILLA = "Vanilla"
+
+
+class ServerJarCache(Base):
+    """A downloaded-and-cached server jar (v0.4).
+
+    v0.4 only ever populates this with **Vanilla** jars fetched from Mojang's
+    version manifest (``source='mojang'``); the schema is deliberately generic
+    so Paper/Fabric/Forge/NeoForge sources can be added later without a
+    migration. ``jar_path`` points at the cached file under ``JAR_CACHE_DIR``;
+    the Create Server flow copies it to ``<server>/server.jar`` on demand.
+
+    There is at most one row per (server_type, version) — re-downloading the
+    same version refreshes the existing row rather than duplicating it.
+    """
+
+    __tablename__ = "server_jar_cache"
+    __table_args__ = (
+        UniqueConstraint("server_type", "version", name="uq_jar_type_version"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    server_type = Column(String(40), nullable=False, default=JAR_TYPE_VANILLA)
+    version = Column(String(64), nullable=False, index=True)
+    # "release" / "snapshot" / "old_beta" ... as reported by the manifest.
+    release_type = Column(String(20), nullable=True)
+    source = Column(String(40), nullable=False, default=JAR_SOURCE_MOJANG)
+    # Absolute path to the cached jar on disk (null until a successful download).
+    jar_path = Column(Text, nullable=True)
+    # The per-version metadata URL (from the manifest) and the resolved
+    # server.jar download URL. Kept for provenance / re-download.
+    manifest_url = Column(Text, nullable=True)
+    download_url = Column(Text, nullable=True)
+    sha1 = Column(String(64), nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    # True for the row matching Mojang's current latest.release.
+    is_latest = Column(Boolean, nullable=False, default=False)
+    downloaded_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )

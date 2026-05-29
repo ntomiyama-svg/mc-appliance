@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 APP_NAME = "mc-appliance"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 
 # Default location of the optional system config file.
 DEFAULT_CONFIG_PATH = "/etc/mc-appliance/config.yaml"
@@ -128,6 +128,27 @@ def _resolve_path(env_key: str, file_key: str, default: Path) -> Path:
     return Path(value).expanduser() if value else default
 
 
+def _resolve_bool(env_key: str, file_key: str, default: bool) -> bool:
+    """Resolve a boolean from env var, then config file, then default."""
+    raw = os.environ.get(env_key)
+    if raw is None:
+        if file_key in _FILE_CONFIG:
+            return bool(_FILE_CONFIG.get(file_key))
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _resolve_int(env_key: str, file_key: str, default: int) -> int:
+    """Resolve an int from env var, then config file, then default."""
+    raw = os.environ.get(env_key)
+    if raw is None:
+        raw = _FILE_CONFIG.get(file_key)
+    try:
+        return int(raw) if raw is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
 # --- Storage / data locations --------------------------------------------------
 DATA_DIR = _resolve_path("MC_APPLIANCE_DATA_DIR", "data_dir", BASE_DIR / "data")
 BACKUP_DIR = _resolve_path(
@@ -145,6 +166,14 @@ LOG_DIR = _resolve_path("MC_APPLIANCE_LOG_DIR", "log_dir", DATA_DIR)
 # their paths are wherever the operator pointed them.
 SERVERS_DIR = _resolve_path(
     "MC_APPLIANCE_SERVERS_DIR", "servers_dir", DATA_DIR / "servers"
+)
+
+# Cache directory for downloaded official Vanilla server jars (v0.4). Like
+# SERVERS_DIR it hangs off DATA_DIR, so a dev checkout gets ./data/jars and a
+# system install (DATA_DIR=/var/lib/mc-appliance) gets /var/lib/mc-appliance/jars.
+# Overridable explicitly with MC_APPLIANCE_JAR_CACHE_DIR / jar_cache_dir.
+JAR_CACHE_DIR = _resolve_path(
+    "MC_APPLIANCE_JAR_CACHE_DIR", "jar_cache_dir", DATA_DIR / "jars"
 )
 
 DB_PATH = DATA_DIR / "mc_appliance.db"
@@ -208,11 +237,47 @@ RCON_CONNECT_TIMEOUT_SECONDS = 5
 # RCON `stop` before falling back to the SIGTERM path.
 RCON_STOP_TIMEOUT_SECONDS = 30
 
+# --- Vanilla server jar cache (v0.4) -------------------------------------------
+# mc-appliance can fetch the official Minecraft Java Edition Vanilla server.jar
+# straight from Mojang's version manifest and cache it under JAR_CACHE_DIR, so a
+# new server can be created from a cached jar instead of a browser upload. This
+# is Vanilla-only; Paper/Fabric/Forge/NeoForge auto-fetch is intentionally NOT
+# implemented (see docs/13_vanilla_jar_cache.md). Arbitrary-URL downloads are
+# forbidden — only the server.jar URL reached *via* the Mojang manifest is used.
+VANILLA_MANIFEST_URL = os.environ.get("MC_APPLIANCE_VANILLA_MANIFEST_URL") or str(
+    _FILE_CONFIG.get(
+        "vanilla_manifest_url",
+        "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json",
+    )
+)
+# Hosts the downloader will accept a server.jar / metadata URL from. A URL that
+# arrives from the manifest but does not match one of these is rejected as a
+# defence-in-depth measure (the manifest itself is the primary trust anchor).
+VANILLA_ALLOWED_DOWNLOAD_HOST_SUFFIXES = (".mojang.com", ".minecraft.net")
+# Whether the dashboard/check logic may reach out to Mojang to learn the latest
+# release. Whether a missing-latest situation triggers an *automatic* download.
+VANILLA_AUTO_CHECK_ENABLED = _resolve_bool(
+    "MC_APPLIANCE_VANILLA_AUTO_CHECK", "vanilla_auto_check_enabled", True
+)
+VANILLA_AUTO_DOWNLOAD_ENABLED = _resolve_bool(
+    "MC_APPLIANCE_VANILLA_AUTO_DOWNLOAD", "vanilla_auto_download_enabled", False
+)
+# How often (hours) a future scheduler tick would re-check; surfaced for the UI
+# and config completeness. The v0.4 check is on-demand (dashboard / button).
+VANILLA_CHECK_INTERVAL_HOURS = _resolve_int(
+    "MC_APPLIANCE_VANILLA_CHECK_INTERVAL_HOURS", "vanilla_check_interval_hours", 24
+)
+# Socket timeout (seconds) for a single Mojang HTTP request. Kept short so the
+# dashboard never hangs for long when the host is offline.
+VANILLA_HTTP_TIMEOUT_SECONDS = _resolve_int(
+    "MC_APPLIANCE_VANILLA_HTTP_TIMEOUT", "vanilla_http_timeout_seconds", 15
+)
+
 # Number of trailing lines of latest.log to show.
 LOG_TAIL_LINES = 200
 
 # Ensure required directories exist at import time.
-for _d in (DATA_DIR, BACKUP_DIR, MANAGED_LOG_DIR, SERVERS_DIR):
+for _d in (DATA_DIR, BACKUP_DIR, MANAGED_LOG_DIR, SERVERS_DIR, JAR_CACHE_DIR):
     os.makedirs(_d, exist_ok=True)
 
 DATABASE_URL = f"sqlite:///{DB_PATH}"

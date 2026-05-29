@@ -98,11 +98,45 @@
 
     <h3 class="section-title">Server jar &amp; EULA</h3>
     <div class="form-grid" style="max-width:none">
-      <div>
-        <label for="jar_file">server.jar (optional, .jar only)</label>
+      <div style="grid-column:1 / -1">
+        <label for="jar_source">server.jar source</label>
+        <select id="jar_source" name="jar_source">
+          <option value="upload" {{ 'selected' if form.jar_source == 'upload' else '' }}>Upload server.jar</option>
+          <option value="cached_latest" {{ 'selected' if form.jar_source == 'cached_latest' else '' }}
+                  {{ 'disabled' if not cached_latest else '' }}>
+            Use cached latest Vanilla server.jar{% if cached_latest %} ({{ cached_latest.version }}){% else %} — none cached{% endif %}
+          </option>
+          <option value="cached_version" {{ 'selected' if form.jar_source == 'cached_version' else '' }}
+                  {{ 'disabled' if not cached_jars else '' }}>
+            Use cached Vanilla version{% if not cached_jars %} — none cached{% endif %}
+          </option>
+        </select>
+        <div class="hint">
+          Cached jars are Vanilla-only (manage them on the
+          <a href="/jars/vanilla">JAR Cache</a> page) and apply to the
+          <strong>Vanilla</strong> server type. Other types must upload a jar.
+        </div>
+      </div>
+
+      <div id="jar-upload-row">
+        <label for="jar_file">server.jar (.jar only)</label>
         <input type="file" id="jar_file" name="jar_file" accept=".jar">
         <div class="hint">Saved as <code>server.jar</code> inside the new folder.</div>
       </div>
+
+      <div id="jar-version-row">
+        <label for="cached_version">Cached Vanilla version</label>
+        <select id="cached_version" name="cached_version">
+          <option value="">— choose a version —</option>
+          {% for j in cached_jars %}
+          <option value="{{ j.version }}" {{ 'selected' if form.cached_version == j.version else '' }}>
+            {{ j.version }}{{ ' (latest)' if j.is_latest else '' }} · {{ j.size_bytes | humansize }}
+          </option>
+          {% endfor %}
+        </select>
+        <div class="hint">Copied to <code>server.jar</code> when creating the server.</div>
+      </div>
+
       <div>
         <label class="check"><input type="checkbox" name="eula_agree" value="true">
           I accept the <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener">Minecraft EULA</a> (required)</label>
@@ -115,4 +149,22 @@
   </form>
 </div>
 
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const source = document.getElementById("jar_source");
+  const uploadRow = document.getElementById("jar-upload-row");
+  const versionRow = document.getElementById("jar-version-row");
+  function sync() {
+    const v = source ? source.value : "upload";
+    if (uploadRow) uploadRow.style.display = v === "upload" ? "" : "none";
+    if (versionRow) versionRow.style.display = v === "cached_version" ? "" : "none";
+  }
+  if (source) {
+    source.addEventListener("change", sync);
+    sync();
+  }
+})();
+</script>
 {% endblock %}

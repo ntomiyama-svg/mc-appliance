@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <p class="muted" style="margin-top:0">
+    Fetch the official <strong>Vanilla</strong> Minecraft Java Edition
+    <code>server.jar</code> from Mojang's version manifest and cache it under
+    <code>{{ cache_dir }}</code>. Cached jars can be selected on the
+    <a href="/servers/create">Create Server</a> page instead of uploading a jar.
+    This is Vanilla-only and is separate from RCON and from running servers.
+    EULA agreement is still required when you create a server.
+  </p>
+
+  <table class="kv">
+    <tr><td>Latest release</td>
+      <td>
+        {% if latest_version %}
+          <strong>{{ latest_version }}</strong>
+          {% if latest_cached %}<span class="badge running">cached</span>
+          {% else %}<span class="badge stopped">not cached</span>{% endif %}
+        {% elif check_error %}
+          <span class="muted">unknown — {{ check_error }}</span>
+        {% elif not auto_check %}
+          <span class="muted">auto-check disabled — use “Check latest”.</span>
+        {% else %}
+          <span class="muted">unknown</span>
+        {% endif %}
+      </td>
+    </tr>
+    <tr><td>Manifest</td><td class="muted" style="font-size:12px">{{ manifest_url }}</td></tr>
+    <tr><td>Auto download</td><td>{{ 'enabled' if auto_download else 'disabled' }}</td></tr>
+  </table>
+
+  <div class="btn-row mt">
+    <button class="btn" type="button" id="jar-check-btn">Check latest</button>
+    <button class="btn primary" type="button" id="jar-download-latest-btn">Download latest</button>
+    <button class="btn" type="button" id="jar-refresh-btn">Refresh cache list</button>
+  </div>
+  <div class="logbox mt" id="jar-result" style="max-height:160px">(no action run yet)</div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Cached Vanilla jars <span class="muted" style="font-size:12px">({{ rows | length }})</span></h3>
+  {% if rows %}
+  <table>
+    <thead>
+      <tr><th>Version</th><th>Type</th><th>Size</th><th>Downloaded</th><th>Latest</th><th>State</th></tr>
+    </thead>
+    <tbody>
+      {% for item in rows %}
+      <tr>
+        <td><strong>{{ item.row.version }}</strong></td>
+        <td class="muted">{{ item.row.release_type or '-' }}</td>
+        <td class="muted">{{ item.row.size_bytes | humansize }}</td>
+        <td class="muted" style="font-size:12px">{{ item.row.downloaded_at | datetimefmt }}</td>
+        <td>{% if item.row.is_latest %}<span class="badge type">latest</span>{% else %}-{% endif %}</td>
+        <td>
+          {% if item.available %}<span class="badge running">on disk</span>
+          {% else %}<span class="badge unknown">missing</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0">No Vanilla jars cached yet. Click <em>Download latest</em>.</p>
+  {% endif %}
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const result = document.getElementById("jar-result");
+  function show(text) { if (result) result.textContent = text; }
+
+  function post(path) {
+    show("Working…");
+    return fetch(path, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" } })
+      .then((r) => {
+        const ct = r.headers.get("content-type") || "";
+        if (!ct.includes("application/json")) {
+          throw new Error("Not authenticated or unexpected response — try reloading.");
+        }
+        return r.json();
+      });
+  }
+
+  const checkBtn = document.getElementById("jar-check-btn");
+  if (checkBtn) checkBtn.addEventListener("click", () => {
+    post("/jars/vanilla/check-latest")
+      .then((res) => show((res.ok ? "✓ " : "✗ ") + res.message))
+      .catch((e) => show("✗ " + e.message));
+  });
+
+  const dlBtn = document.getElementById("jar-download-latest-btn");
+  if (dlBtn) dlBtn.addEventListener("click", () => {
+    show("Downloading latest Vanilla server.jar… this may take a moment.");
+    post("/jars/vanilla/download-latest")
+      .then((res) => {
+        show((res.ok ? "✓ " : "✗ ") + res.message);
+        if (res.ok) setTimeout(() => window.location.reload(), 800);
+      })
+      .catch((e) => show("✗ " + e.message));
+  });
+
+  const refreshBtn = document.getElementById("jar-refresh-btn");
+  if (refreshBtn) refreshBtn.addEventListener("click", () => window.location.reload());
+})();
+</script>
+{% endblock %}

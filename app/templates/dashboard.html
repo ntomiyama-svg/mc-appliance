@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
 
+{% if vanilla_warning %}
+<div class="errors" style="margin-bottom:16px">
+  ⚠ {{ vanilla_warning }} <a href="/jars/vanilla">Go to JAR Cache →</a>
+</div>
+{% endif %}
+
 <div class="stat-grid">
   <div class="card stat">
     <div class="label">Registered Servers</div>

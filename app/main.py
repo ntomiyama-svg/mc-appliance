@@ -14,7 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.auth import AuthMiddleware
 from app.config import APP_NAME, APP_VERSION, BASE_DIR, SECRET_KEY
 from app.database import init_db
-from app.routers import auth, backups, dashboard, servers, system
+from app.routers import auth, backups, dashboard, jars, servers, system
 from app.services import scheduler_service
 from app.templating import templates
 
@@ -64,6 +64,7 @@ app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(servers.router)
 app.include_router(backups.router)
+app.include_router(jars.router)
 app.include_router(system.router)
 
 

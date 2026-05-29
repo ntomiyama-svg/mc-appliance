@@ -191,6 +191,20 @@ def save_jar(server_dir: Path, buffer: tempfile.SpooledTemporaryFile) -> None:
         shutil.copyfileobj(buffer, fh)
 
 
+def place_cached_jar(server_dir: Path, src_path: Path) -> None:
+    """Copy an already-cached jar (e.g. a Vanilla jar) to ``server.jar``.
+
+    ``src_path`` must point at an existing file (it is produced by
+    :mod:`vanilla_downloader`, never by user input). The destination is resolved
+    and checked to live directly under ``server_dir`` like every other write.
+    """
+    src = Path(src_path)
+    if not src.is_file():
+        raise CreationError("The selected cached jar is no longer available on disk.")
+    dest = _safe_child(server_dir, "server.jar")
+    shutil.copyfile(src, dest)
+
+
 def normalize_gamemode(value: str) -> str:
     value = (value or "").strip().lower()
     return value if value in GAMEMODES else GAMEMODES[0]

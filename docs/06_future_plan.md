@@ -67,6 +67,40 @@ design:
   supervisor backend can be swapped from `subprocess` to systemd without touching
   routers. This stays gated behind an explicit version bump + security review.
 
+## v0.4 — Vanilla server jar cache ✅ (delivered)
+
+Delivered in v0.4:
+
+- **Vanilla jar cache** ✅ — fetch the official Minecraft Java Edition Vanilla
+  `server.jar` from Mojang's version manifest, verify it (SHA-1 when provided),
+  and cache it under `JAR_CACHE_DIR`. The Create Server page can then use a
+  cached jar instead of a browser upload. See
+  [`13_vanilla_jar_cache.md`](13_vanilla_jar_cache.md).
+
+Scope / deliberate limits (v0.4):
+
+- **Vanilla only.** Paper / Fabric / Forge / NeoForge auto-fetch is **not**
+  implemented — those server types still require a jar upload. This is the seam
+  for future per-loader downloaders.
+- **No arbitrary-URL downloads.** Only the `server.jar` URL resolved *through*
+  the Mojang manifest is ever fetched, and only over HTTPS to an allow-listed
+  Mojang host. There is no free-form URL field.
+- The cache is **separate** from running servers and from RCON — caching a jar
+  never starts anything. **EULA agreement is still required** at server-creation
+  time, exactly as before.
+- The feature needs **outbound internet** to Mojang. In an offline environment,
+  keep using the upload path; the dashboard warning and checks degrade silently
+  (a failed external check never brings the app down).
+
+Still pending / carried forward for jar management:
+
+- Per-loader (Paper/Fabric/Forge/NeoForge) downloaders behind their own APIs.
+- A background scheduler that periodically re-checks/downloads the latest
+  release (the `VANILLA_CHECK_INTERVAL_HOURS` setting is reserved for this; v0.4
+  checks on-demand from the dashboard and the JAR Cache page).
+- Pruning of old cached jars (blocked by the same "no file deletion" rule as
+  backup retention).
+
 ## Later
 
 - **Rocky Linux 9 appliance image**: a packaged, opinionated image where

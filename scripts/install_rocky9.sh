@@ -43,6 +43,8 @@ PACKAGES=(
   tar
   zip
   unzip
+  # rsync powers the v0.6 hardlink snapshot backups (see docs/18_backup_restore.md).
+  rsync
   # OpenJDK 17 is a common baseline for modern Minecraft servers. Adjust as
   # needed for your server version (e.g. java-21-openjdk).
   java-17-openjdk-headless

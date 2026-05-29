@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 APP_NAME = "mc-appliance"
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.6.0"
 
 # Default location of the optional system config file.
 DEFAULT_CONFIG_PATH = "/etc/mc-appliance/config.yaml"
@@ -221,6 +221,21 @@ SCHEDULER_TICK_SECONDS = 60
 # retention but does NOT prune old backups — deletion stays out of scope per the
 # v0.1 "no file deletion" rule (see docs/12_backup_schedule.md).
 DEFAULT_RETENTION_COUNT = 7
+
+# --- Backup / restore hardening (v0.6) -----------------------------------------
+# v0.6 adds rsync hardlink snapshots with stop-first consistency, generation
+# retention and restore (see docs/18_backup_restore.md). The snapshot directory
+# name uses this sortable, host-local timestamp format.
+BACKUP_TIMESTAMP_FMT = "%Y%m%d_%H%M%S"
+# Max seconds a single rsync (snapshot or restore) may run before we give up and
+# treat the backup/restore as failed. Generous: a large world can take a while.
+RSYNC_TIMEOUT_SECONDS = _resolve_int(
+    "MC_APPLIANCE_RSYNC_TIMEOUT", "rsync_timeout_seconds", 3600
+)
+# A v0.6 daily backup is considered "already done today" if a successful normal
+# snapshot exists within this many hours, so the scheduler never double-runs in
+# the same scheduled minute or immediately after a restart.
+BACKUP_DAILY_DEDUP_HOURS = 12
 
 # How long (seconds) to wait for a graceful SIGTERM shutdown before reporting
 # the stop as failed. A normal stop never escalates to SIGKILL automatically —

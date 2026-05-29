@@ -40,6 +40,21 @@ _ADDED_COLUMNS = {
         ("last_start_error", "VARCHAR(255)"),
         ("last_runtime_status", "VARCHAR(32)"),
         ("last_startup_duration_seconds", "INTEGER"),
+        # v0.6 per-server backup settings.
+        ("backup_enabled", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("backup_time", "VARCHAR(5) NOT NULL DEFAULT '04:00'"),
+        ("backup_on_start_enabled", "BOOLEAN NOT NULL DEFAULT 1"),
+        ("backup_on_start_min_interval_hours", "INTEGER NOT NULL DEFAULT 6"),
+        ("backup_keep_generations", "INTEGER NOT NULL DEFAULT 7"),
+    ],
+    "backups": [
+        # v0.6 backup metadata. Existing v0.3 rows are zip backups, so the
+        # method default for *pre-existing* rows is set to 'zip' here; new rows
+        # get their value from the ORM default ('rsync').
+        ("method", "VARCHAR(16) NOT NULL DEFAULT 'zip'"),
+        ("backup_type", "VARCHAR(32) NOT NULL DEFAULT 'normal'"),
+        ("status", "VARCHAR(16) NOT NULL DEFAULT 'ok'"),
+        ("note", "TEXT"),
     ],
 }
 

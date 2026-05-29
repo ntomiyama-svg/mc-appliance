@@ -29,6 +29,9 @@ It lets you:
   the allow-listed RCON command box — see [Server console](#server-console-v05)
 - View and edit `server.properties` (with automatic `.bak` backup)
 - Create manual zip backups
+- **Backup / Restore (v0.6):** stop-first **rsync hardlink snapshots** with
+  generation retention, optional backup-on-start, and a guarded restore — see
+  [Backup / Restore](#backup--restore-hardening-v06)
 - See host system info (OS, Python, Java, disk, IP)
 - **Java Runtime Manager (v0.6):** detect installed Java runtimes and, when
   opted in, install Java 8 / 11 / 17 / 21 / 25 from the GUI via a locked-down
@@ -414,6 +417,41 @@ thread runs them while the app is up and logs outcomes to
 > deletion is intentionally out of scope (see the security model). See
 > [`docs/12_backup_schedule.md`](docs/12_backup_schedule.md).
 
+## Backup / Restore hardening (v0.6)
+
+Since **v0.6** each server has a **Backups** section (server detail page) that
+takes hardened **rsync hardlink snapshots**, keeps a fixed number of
+generations, and can **restore** a previous generation. Full details:
+[`docs/18_backup_restore.md`](docs/18_backup_restore.md).
+
+- **Stop-first, consistent snapshots.** A running server is **stopped** (safe
+  stop: RCON → stdin → `SIGTERM`, **never `SIGKILL`**) before the snapshot, then
+  restarted **only if it was running**. A server that was stopped stays stopped;
+  a server that cannot be stopped **aborts the backup** (nothing is killed).
+- **rsync hardlink snapshots** under `<BACKUP_DIR>/<server_name>/<timestamp>/`:
+  the first is a full copy, later ones use `--link-dest` so unchanged files are
+  hardlinked to the previous generation — space-efficient, yet every generation
+  is a complete, independently restorable tree.
+- **Generation retention** — the newest `backup_keep_generations` (default **7**)
+  successful *normal* snapshots are kept; older ones are pruned. Pre-restore
+  snapshots are kept separately and never pruned.
+- **Backup-on-start** (default on) — clicking **Start** takes a snapshot first,
+  unless one was taken within `backup_on_start_min_interval_hours` (default
+  **6 h**). If the backup **fails, the Start is aborted** and the UI shows
+  *"backup failed, start aborted"*.
+- **Daily backups** — set a `backup_time` (host-local `HH:MM`) and enable
+  `backup_enabled`; the existing in-process scheduler runs the stop-first
+  snapshot daily.
+- **Restore** — allowed **only while the server is stopped**. A **mandatory
+  pre-restore safety snapshot** is taken first, then the chosen snapshot is
+  copied back over the server directory. The server is **left stopped** (you
+  start it manually).
+
+> `rsync` is required and is installed by the install scripts. **File deletion is
+> limited to backup snapshots under `BACKUP_DIR`** (retention + the Delete
+> button) — registered server files are never deleted; a restore replaces them
+> via rsync with a pre-restore snapshot as the safety net.
+
 ## Registering an existing Minecraft server
 
 1. Click **Servers → Register existing folder**.
@@ -478,8 +516,8 @@ never copies or moves your existing data during registration.
 - No *automatic* `SIGKILL` — a normal Stop escalates only to `SIGTERM`;
   force-kill is the explicit, confirmed **Kill** button (v0.5)
 - No arbitrary RCON commands (allow-list only — see [RCON](#rcon-v02))
-- No backup restore
-- No server deletion or file deletion
+- No server deletion; **file deletion is limited to backup snapshots** under
+  `BACKUP_DIR` (v0.6 retention + Delete) — server files are never deleted
 - No Ubuntu/Debian-specific tooling
 
 ## Roadmap / future plans
@@ -490,8 +528,9 @@ See [`docs/06_future_plan.md`](docs/06_future_plan.md). Highlights:
 - v0.2: RCON-based safe stop + allow-listed console + `save-all` before backups ✅
 - v0.3: GUI server creation, mod/plugin management, scheduled backups ✅
 - v0.4: Vanilla server.jar cache (Mojang manifest fetch + create-from-cache) ✅
+- v0.6: backup/restore hardening — stop-first rsync hardlink snapshots, generation
+  retention, backup-on-start, guarded restore ✅
 - v0.2+ (pending): HTTPS, CSRF tokens, multi-user/roles, systemd unit management
-- v0.3+ (pending): backup restore, backup retention pruning, multi-user roles
 - Later: Rocky Linux appliance image, Ubuntu/Debian support
 
 ## Documentation
@@ -508,3 +547,4 @@ See [`docs/06_future_plan.md`](docs/06_future_plan.md). Highlights:
 - [`docs/11_mod_plugin_management.md`](docs/11_mod_plugin_management.md)
 - [`docs/12_backup_schedule.md`](docs/12_backup_schedule.md)
 - [`docs/13_vanilla_jar_cache.md`](docs/13_vanilla_jar_cache.md)
+- [`docs/18_backup_restore.md`](docs/18_backup_restore.md)

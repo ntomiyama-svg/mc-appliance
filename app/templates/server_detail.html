@@ -259,6 +259,92 @@
   {{ collection("plugins", "Plugins", plugins) }}
 </div>
 
+<h3 class="section-title">Backups</h3>
+<div id="backups">
+  <div class="card">
+    <h3 style="margin-top:0">Backup settings</h3>
+    <form method="post" action="/servers/{{ server.id }}/backup/settings" class="form-grid"
+          style="max-width:none; grid-template-columns:1fr 1fr">
+      <div style="grid-column:1 / -1">
+        <label class="check"><input type="checkbox" name="backup_enabled" value="true" {{ 'checked' if server.backup_enabled else '' }}> Enable daily backup</label>
+      </div>
+      <div>
+        <label for="backup_time">Daily time (HH:MM, host-local)</label>
+        <input type="time" id="backup_time" name="backup_time" value="{{ server.backup_time or '04:00' }}">
+      </div>
+      <div>
+        <label for="backup_keep_generations">Keep generations (normal backups)</label>
+        <input type="number" id="backup_keep_generations" name="backup_keep_generations" min="1"
+               value="{{ server.backup_keep_generations }}">
+      </div>
+      <div style="grid-column:1 / -1">
+        <label class="check"><input type="checkbox" name="backup_on_start_enabled" value="true" {{ 'checked' if server.backup_on_start_enabled else '' }}> Back up before Start</label>
+      </div>
+      <div>
+        <label for="backup_on_start_min_interval_hours">…unless backed up within (hours)</label>
+        <input type="number" id="backup_on_start_min_interval_hours" name="backup_on_start_min_interval_hours" min="0"
+               value="{{ server.backup_on_start_min_interval_hours }}">
+      </div>
+      <div class="btn-row" style="grid-column:1 / -1">
+        <button class="btn primary" type="submit">Save backup settings</button>
+      </div>
+      <p class="hint" style="grid-column:1 / -1">
+        Backups are <strong>rsync hardlink snapshots</strong>. A running server is
+        <strong>stopped first</strong> for a consistent snapshot and restarted only if it was
+        running; a server that will not stop aborts the backup (no SIGKILL). The newest
+        {{ server.backup_keep_generations }} successful normal snapshots are kept; older ones are pruned.
+      </p>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="btn-row" style="margin-top:0">
+      <form class="inline" method="post" action="/servers/{{ server.id }}/backup/run"
+            data-confirm="Take a snapshot now? A running server will be stopped for a consistent backup, then restarted.">
+        <button class="btn primary" type="submit">📸 Create snapshot now</button>
+      </form>
+    </div>
+    <table style="margin-top:12px">
+      <thead>
+        <tr><th>Created</th><th>Type</th><th>Size</th><th>State</th><th>Note</th><th class="right">Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for b in backups %}
+        <tr>
+          <td>{{ b.created_at | datetimefmt }}</td>
+          <td>
+            {{ 'pre-restore' if b.backup_type == 'pre_restore' else b.backup_type }}
+            {% if b.method != 'rsync' %}<span class="muted" style="font-size:11px">({{ b.method }})</span>{% endif %}
+          </td>
+          <td class="muted" style="font-size:12px">{{ b.size_bytes | humansize }}</td>
+          <td>
+            {% if b.status == 'ok' %}<span class="badge running">ok</span>
+            {% elif b.status == 'failed' %}<span class="badge stopped">failed</span>
+            {% else %}<span class="badge">{{ b.status }}</span>{% endif %}
+          </td>
+          <td class="muted" style="font-size:12px">{{ b.note or '—' }}</td>
+          <td class="right">
+            <form class="inline" method="post" action="/servers/{{ server.id }}/backup/{{ b.id }}/restore"
+                  data-confirm="Restore from {{ b.backup_name }}? A pre-restore safety snapshot is taken first. The server must be stopped and will NOT auto-start.">
+              <button class="btn" type="submit"
+                      {{ 'disabled' if (server.status != 'stopped' or b.status != 'ok' or b.method != 'rsync') else '' }}>Restore</button>
+            </form>
+            <form class="inline" method="post" action="/servers/{{ server.id }}/backup/{{ b.id }}/delete"
+                  data-confirm="Delete backup {{ b.backup_name }} permanently?">
+              <button class="btn stop" type="submit">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="muted">No backups yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">Restore is only allowed while the server is <strong>stopped</strong>, and only for
+      completed rsync snapshots. A mandatory pre-restore snapshot is always created first.</p>
+  </div>
+</div>
+
 <h3 class="section-title">Backup schedule</h3>
 <div class="card" id="schedule">
   {% if schedule %}

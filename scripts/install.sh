@@ -67,7 +67,7 @@ elif command -v apt-get >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
   apt-get install -y \
-    python3 python3-venv python3-pip git tar zip unzip openjdk-17-jre-headless
+    python3 python3-venv python3-pip git tar zip unzip rsync openjdk-17-jre-headless
 else
   err "No supported package manager (dnf/apt) found."
   err "Install python3 + venv + pip, git, tar, zip, unzip and a JRE manually,"
@@ -145,8 +145,10 @@ log "Setting ownership and permissions ..."
 # web app cannot rewrite its own code at runtime.
 chown -R "root:$APP_GROUP" "$INSTALL_DIR"
 chmod -R g+rX "$INSTALL_DIR"
-# Persistent state and logs are writable by the service user.
-chown -R "$APP_USER:$APP_GROUP" "$DATA_DIR" "$LOG_DIR"
+# Persistent state, logs and backups are writable by the service user.
+# BACKUP_DIR is included explicitly in case it was pointed outside DATA_DIR
+# (the v0.6 rsync snapshots are written here as the unprivileged mcapp user).
+chown -R "$APP_USER:$APP_GROUP" "$DATA_DIR" "$LOG_DIR" "$BACKUP_DIR"
 # Config: root-owned, readable (not writable) by the service group.
 chown "root:$APP_GROUP" "$CONFIG_DIR" "$CONFIG_FILE"
 chmod 750 "$CONFIG_DIR"

@@ -148,6 +148,32 @@ def _run_due_backup(db, schedule: BackupSchedule, now: datetime) -> None:
     logger.info("schedule %s (%s): %s%s%s", schedule.id, server.name, warn, msg, retention_note)
 
 
+def _run_v06_daily(db, now: datetime) -> None:
+    """Run any due v0.6 per-server daily rsync snapshots (stop-aware).
+
+    Independent of the v0.3 ``BackupSchedule`` pass above: this reads the
+    ``Server.backup_enabled`` / ``backup_time`` settings directly and delegates
+    the stop-first snapshot + retention to ``backup_service.run_due_server_backup``.
+    Each server is isolated so one failure can't stop the others.
+    """
+    from app.services import backup_service
+
+    servers = db.query(Server).filter(Server.backup_enabled.is_(True)).all()
+    for server in servers:
+        try:
+            outcome = backup_service.run_due_server_backup(db, server, now)
+            if outcome is not None:
+                logger.info(
+                    "v0.6 daily backup %s: %s", server.name, outcome.message
+                )
+        except Exception as exc:  # noqa: BLE001 - log and continue with the next one
+            logger.exception("v0.6 daily backup for server %s failed: %s", server.id, exc)
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def _tick() -> None:
     """One scheduler pass. Each schedule is isolated so one failure can't stop others."""
     now = datetime.now()
@@ -167,6 +193,9 @@ def _tick() -> None:
                     db.commit()
                 except Exception:  # noqa: BLE001
                     db.rollback()
+
+        # v0.6 per-server daily rsync snapshots (separate from BackupSchedule).
+        _run_v06_daily(db, now)
     finally:
         db.close()
 

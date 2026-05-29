@@ -36,10 +36,12 @@ from app.models import (
     SCHEDULE_DAILY,
     SCHEDULE_INTERVAL,
     STATUS_STOPPED,
+    Backup,
     BackupSchedule,
     Server,
 )
 from app.services import (
+    backup_service,
     java_runtime,
     log_service,
     mod_service,
@@ -503,6 +505,8 @@ def server_detail(server_id: int, request: Request, db: Session = Depends(get_db
             "plugins": plugins,
             "schedule": schedule,
             "retention_default": DEFAULT_RETENTION_COUNT,
+            # v0.6 backup / restore.
+            "backups": backup_service.list_backups(db, server),
             # v0.5 console section.
             "console_default_lines": CONSOLE_LOG_DEFAULT_LINES,
             "console_max_lines": CONSOLE_LOG_MAX_LINES,
@@ -676,10 +680,17 @@ async def properties_save(server_id: int, request: Request, db: Session = Depend
 @router.post("/{server_id}/start")
 def action_start(server_id: int, db: Session = Depends(get_db)):
     server = _get_server_or_404(db, server_id)
+    # v0.6 backup-on-start: take a throttled snapshot before launch. If the
+    # backup fails, abort the start (the world is left untouched, server stopped).
+    gate = backup_service.maybe_backup_on_start(db, server)
+    if not gate.allow_start:
+        return _action_redirect(server_id, gate.message)
     try:
         msg = server_process.start_server(db, server)
     except FileNotFoundError as exc:
         msg = f"Start failed: {exc}"
+    if gate.message:
+        msg = f"{gate.message} {msg}"
     return _action_redirect(server_id, msg)
 
 
@@ -958,5 +969,108 @@ def save_schedule(
         url=f"/servers/{server_id}?msg="
         + quote(f"Backup schedule saved ({state}, {detail}).")
         + "#schedule",
+        status_code=303,
+    )
+
+
+# ----- Backup / restore hardening (v0.6) --------------------------------------
+#
+# v0.6 rsync hardlink snapshots with stop-first consistency, per-server settings,
+# generation retention and restore. All routes are admin-only via AuthMiddleware.
+# Path layout is /{server_id}/backup/... so it never collides with the
+# /{server_id}/{kind}/upload|toggle mod/plugin routes.
+
+
+def _get_backup_or_404(db: Session, server: Server, backup_id: int) -> Backup:
+    backup = (
+        db.query(Backup)
+        .filter(Backup.id == backup_id, Backup.server_id == server.id)
+        .first()
+    )
+    if backup is None:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    return backup
+
+
+@router.post("/{server_id}/backup/settings")
+def backup_settings(
+    server_id: int,
+    backup_enabled: Optional[str] = Form(None),
+    backup_time: str = Form("04:00"),
+    backup_on_start_enabled: Optional[str] = Form(None),
+    backup_on_start_min_interval_hours: str = Form("6"),
+    backup_keep_generations: str = Form("7"),
+    db: Session = Depends(get_db),
+):
+    server = _get_server_or_404(db, server_id)
+
+    def _checked(value: Optional[str]) -> bool:
+        return (value or "").lower() in ("on", "true", "1", "yes")
+
+    # Validate HH:MM (24h); reject bad input rather than store garbage.
+    time_str = (backup_time or "").strip()
+    parts = time_str.split(":")
+    valid_time = (
+        len(parts) == 2
+        and parts[0].isdigit()
+        and parts[1].isdigit()
+        and 0 <= int(parts[0]) <= 23
+        and 0 <= int(parts[1]) <= 59
+    )
+    if not valid_time:
+        return _action_redirect(server_id, "Backup time must be HH:MM (24-hour). Not saved.")
+
+    try:
+        interval_i = max(0, int(backup_on_start_min_interval_hours))
+    except (TypeError, ValueError):
+        interval_i = 6
+    try:
+        keep_i = max(1, int(backup_keep_generations))
+    except (TypeError, ValueError):
+        keep_i = 7
+
+    server.backup_enabled = _checked(backup_enabled)
+    server.backup_time = time_str
+    server.backup_on_start_enabled = _checked(backup_on_start_enabled)
+    server.backup_on_start_min_interval_hours = interval_i
+    server.backup_keep_generations = keep_i
+    db.commit()
+    return RedirectResponse(
+        url=f"/servers/{server_id}?msg={quote('Backup settings saved.')}#backups",
+        status_code=303,
+    )
+
+
+@router.post("/{server_id}/backup/run")
+def backup_run(server_id: int, db: Session = Depends(get_db)):
+    """Take a stop-aware rsync snapshot now (stops a running server first)."""
+    server = _get_server_or_404(db, server_id)
+    outcome = backup_service.backup_now(db, server)
+    return RedirectResponse(
+        url=f"/servers/{server_id}?msg={quote(outcome.message)}#backups",
+        status_code=303,
+    )
+
+
+@router.post("/{server_id}/backup/{backup_id}/restore")
+def backup_restore(server_id: int, backup_id: int, db: Session = Depends(get_db)):
+    server = _get_server_or_404(db, server_id)
+    backup = _get_backup_or_404(db, server, backup_id)
+    outcome = backup_service.restore_backup(db, server, backup)
+    return RedirectResponse(
+        url=f"/servers/{server_id}?msg={quote(outcome.message)}#backups",
+        status_code=303,
+    )
+
+
+@router.post("/{server_id}/backup/{backup_id}/delete")
+def backup_delete(server_id: int, backup_id: int, db: Session = Depends(get_db)):
+    server = _get_server_or_404(db, server_id)
+    backup = _get_backup_or_404(db, server, backup_id)
+    name = backup.backup_name
+    ok = backup_service.delete_backup(db, server, backup)
+    msg = f"Backup {name} deleted." if ok else "Could not delete backup."
+    return RedirectResponse(
+        url=f"/servers/{server_id}?msg={quote(msg)}#backups",
         status_code=303,
     )

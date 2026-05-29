@@ -30,6 +30,30 @@ STATUS_STOPPING = "stopping"
 STATUS_CRASHED = "crashed"
 STATUS_FAILED_TO_START = "failed_to_start"
 
+# --- Backup status / type constants (v0.6) -----------------------------------
+# Backups recorded in the ``backups`` table can be in any of these states. v0.3
+# zip backups are written straight to ``ok``; v0.6 rsync snapshots move through
+# in_progress -> ok / failed so a crash mid-snapshot is visible, never silent.
+BACKUP_OK = "ok"
+BACKUP_FAILED = "failed"
+BACKUP_IN_PROGRESS = "in_progress"
+
+# ``backup_type`` distinguishes ordinary generational backups from the mandatory
+# safety snapshot taken just before a restore. Only NORMAL backups participate in
+# generation retention; PRE_RESTORE snapshots are always kept.
+BACKUP_TYPE_NORMAL = "normal"
+BACKUP_TYPE_PRE_RESTORE = "pre_restore"
+
+# ``method`` records how a backup was produced. v0.3 zip backups are "zip"; v0.6
+# rsync hardlink snapshots are "rsync". Only rsync snapshots can be restored.
+BACKUP_METHOD_ZIP = "zip"
+BACKUP_METHOD_RSYNC = "rsync"
+
+# Per-server backup defaults (v0.6).
+DEFAULT_BACKUP_TIME = "04:00"
+DEFAULT_BACKUP_ON_START_MIN_INTERVAL_HOURS = 6
+DEFAULT_BACKUP_KEEP_GENERATIONS = 7
+
 
 class Server(Base):
     __tablename__ = "servers"
@@ -76,6 +100,21 @@ class Server(Base):
     last_runtime_status = Column(String(32), nullable=True)
     last_startup_duration_seconds = Column(Integer, nullable=True)
 
+    # --- Backup / restore settings (v0.6) ------------------------------------
+    # When enabled, a daily rsync snapshot is taken at ``backup_time`` (HH:MM,
+    # host-local) by the in-process scheduler. ``backup_on_start_*`` controls the
+    # throttled snapshot taken just before a manual Start. ``backup_keep_generations``
+    # is how many successful *normal* snapshots are retained (oldest pruned).
+    backup_enabled = Column(Boolean, nullable=False, default=False)
+    backup_time = Column(String(5), nullable=False, default=DEFAULT_BACKUP_TIME)
+    backup_on_start_enabled = Column(Boolean, nullable=False, default=True)
+    backup_on_start_min_interval_hours = Column(
+        Integer, nullable=False, default=DEFAULT_BACKUP_ON_START_MIN_INTERVAL_HOURS
+    )
+    backup_keep_generations = Column(
+        Integer, nullable=False, default=DEFAULT_BACKUP_KEEP_GENERATIONS
+    )
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -117,6 +156,13 @@ class Backup(Base):
     backup_name = Column(String(255), nullable=False)
     backup_path = Column(Text, nullable=False)
     size_bytes = Column(Integer, nullable=False, default=0)
+    # v0.6 metadata. ``method`` is "zip" (v0.3) or "rsync" (v0.6 snapshot dir);
+    # only rsync snapshots can be restored. ``backup_type`` is normal/pre_restore
+    # (retention only prunes normal). ``status`` tracks in_progress/ok/failed.
+    method = Column(String(16), nullable=False, default=BACKUP_METHOD_RSYNC)
+    backup_type = Column(String(32), nullable=False, default=BACKUP_TYPE_NORMAL)
+    status = Column(String(16), nullable=False, default=BACKUP_OK)
+    note = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     server = relationship("Server", back_populates="backups")
